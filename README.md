@@ -4,6 +4,7 @@
 ![SDK Logo](./docs/images/Polkadot_Logo_Horizontal_Pink_Black.png#gh-light-mode-only)
 
 # Polkadot SDK
+jakas zmiana
 
 ![GitHub stars](https://img.shields.io/github/stars/paritytech/polkadot-sdk)&nbsp;&nbsp;![GitHub
 forks](https://img.shields.io/github/forks/paritytech/polkadot-sdk)
