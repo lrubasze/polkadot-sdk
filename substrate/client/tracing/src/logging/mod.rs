@@ -204,7 +204,7 @@ where
 				let value = parts[1].trim();
 
 				match key {
-					"lru_cache_size" => {
+					"lru_cache_size" =>
 						if let Ok(size) = value.parse::<usize>() {
 							cache_config = cache_config.with_lru_cache_size(size);
 							eprintln!("prepare_subscriber interest-cache: lru_cache_size = {size}");
@@ -213,8 +213,7 @@ where
 								"prepare_subscriber interest-cache: invalid lru_cache_size value '{}'",
 								value
 							);
-						}
-					},
+						},
 					"min_verbosity" => {
 						let level_filter = match value.to_lowercase().as_str() {
 							"error" => Some(log::Level::Error),
@@ -233,7 +232,9 @@ where
 
 						if let Some(level) = level_filter {
 							cache_config = cache_config.with_min_verbosity(level);
-							eprintln!("prepare_subscriber interest-cache: min_verbosity = {level:?}");
+							eprintln!(
+								"prepare_subscriber interest-cache: min_verbosity = {level:?}"
+							);
 						}
 					},
 					_ => {
@@ -246,6 +247,7 @@ where
 			}
 		}
 
+		eprintln!("prepare_subscriber interest-cache: {cache_config:?}");
 		log_tracer = log_tracer.with_interest_cache(cache_config);
 	} else {
 		eprintln!("prepare_subscriber interest-cache: disabled");
