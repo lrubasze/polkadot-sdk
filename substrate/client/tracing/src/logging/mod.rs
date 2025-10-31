@@ -175,12 +175,83 @@ where
 	let max_level = to_log_level_filter(max_level_hint);
 
 	eprintln!("prepare_subscriber max_level = {max_level:?}");
-	eprintln!("prepare_subscriber interest-cache: enabled");
 
-	tracing_log::LogTracer::builder()
-		.with_max_level(max_level)
-		.with_interest_cache(tracing_log::InterestCacheConfig::default())
-		.init()?;
+	// Configure interest cache from environment variable
+	// - Not set: disabled
+	// - "default": enabled with default config
+	// - "key=value,key=value": enabled with custom config
+	let mut log_tracer = tracing_log::LogTracer::builder().with_max_level(max_level);
+
+	if let Ok(interest_cache_config) = std::env::var("INTEREST_CACHE") {
+		eprintln!("prepare_subscriber interest-cache: enabled");
+
+		let mut cache_config = tracing_log::InterestCacheConfig::default();
+
+		// Parse configuration if not "default"
+		if interest_cache_config.to_lowercase() != "default" {
+			// Parse key=value pairs separated by commas
+			for pair in interest_cache_config.split(',') {
+				let parts: Vec<&str> = pair.trim().split('=').collect();
+				if parts.len() != 2 {
+					eprintln!(
+						"prepare_subscriber interest-cache: invalid config pair '{}', expected key=value",
+						pair
+					);
+					continue;
+				}
+
+				let key = parts[0].trim();
+				let value = parts[1].trim();
+
+				match key {
+					"lru_cache_size" => {
+						if let Ok(size) = value.parse::<usize>() {
+							cache_config = cache_config.with_lru_cache_size(size);
+							eprintln!("prepare_subscriber interest-cache: lru_cache_size = {size}");
+						} else {
+							eprintln!(
+								"prepare_subscriber interest-cache: invalid lru_cache_size value '{}'",
+								value
+							);
+						}
+					},
+					"min_verbosity" => {
+						let level_filter = match value.to_lowercase().as_str() {
+							"error" => Some(log::Level::Error),
+							"warn" => Some(log::Level::Warn),
+							"info" => Some(log::Level::Info),
+							"debug" => Some(log::Level::Debug),
+							"trace" => Some(log::Level::Trace),
+							_ => {
+								eprintln!(
+									"prepare_subscriber interest-cache: invalid min_verbosity '{}', using default",
+									value
+								);
+								None
+							},
+						};
+
+						if let Some(level) = level_filter {
+							cache_config = cache_config.with_min_verbosity(level);
+							eprintln!("prepare_subscriber interest-cache: min_verbosity = {level:?}");
+						}
+					},
+					_ => {
+						eprintln!(
+							"prepare_subscriber interest-cache: unknown config key '{}'",
+							key
+						);
+					},
+				}
+			}
+		}
+
+		log_tracer = log_tracer.with_interest_cache(cache_config);
+	} else {
+		eprintln!("prepare_subscriber interest-cache: disabled");
+	}
+
+	log_tracer.init()?;
 
 	// If we're only logging `INFO` entries then we'll use a simplified logging format.
 	let detailed_output = match max_level_hint {
