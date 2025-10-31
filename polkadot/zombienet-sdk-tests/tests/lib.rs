@@ -6,5 +6,6 @@ mod disabling;
 mod elastic_scaling;
 #[cfg(feature = "zombie-ci")]
 mod functional;
+mod parachains;
 #[cfg(feature = "zombie-ci")]
 mod smoke;

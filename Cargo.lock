@@ -5518,6 +5518,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core 0.9.8",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7711,7 +7725,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "821239e5672ff23e2a7060901fa622950bbd80b649cdaadd78d1c1767ed14eb4"
 dependencies = [
  "cfg-if",
- "dashmap",
+ "dashmap 5.5.1",
  "futures",
  "futures-timer",
  "no-std-compat",
@@ -17387,14 +17401,18 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "cumulus-zombienet-sdk-helpers",
+ "dashmap 6.1.0",
  "env_logger 0.11.3",
+ "futures",
  "log",
  "parity-scale-codec",
  "polkadot-primitives",
+ "rand 0.8.5",
  "sc-executor",
  "sc-runtime-utilities",
  "serde",
  "serde_json",
+ "sp-core 28.0.0",
  "sp-io",
  "substrate-build-script-utils",
  "subxt 0.43.0",

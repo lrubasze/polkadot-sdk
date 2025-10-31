@@ -11,11 +11,15 @@ publish = false
 anyhow = { workspace = true }
 codec = { workspace = true, features = ["derive"] }
 cumulus-zombienet-sdk-helpers = { workspace = true }
+dashmap = "6.1"
 env_logger = { workspace = true }
+futures = { workspace = true }
 log = { workspace = true }
 polkadot-primitives = { workspace = true, default-features = true }
+rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sp-core = { workspace = true }
 subxt = { workspace = true, default-features = false }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tokio-util = { workspace = true, features = ["time"] }
