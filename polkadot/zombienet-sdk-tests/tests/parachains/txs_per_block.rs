@@ -196,7 +196,7 @@ async fn setup_network() -> Result<Network<LocalFileSystem>, anyhow::Error> {
 			let parachain_cmd = std::env::var("PARACHAIN_CMD")
 				.unwrap_or("polkadot-parachain".to_string());
 			p.with_id(2000)
-				.with_default_command(&parachain_cmd)
+				.with_default_command(parachain_cmd.as_str())
 				.with_default_image(
 					std::env::var("COL_IMAGE")
 						.unwrap_or("docker.io/paritypr/colander:latest".to_string())
@@ -207,7 +207,7 @@ async fn setup_network() -> Result<Network<LocalFileSystem>, anyhow::Error> {
 					let log_level = std::env::var("COLLATOR_LOG").unwrap_or("-linfo".to_string());
 					n.with_name("collator").validator(true).with_args(vec![
 						("--warm-up-trie-cache").into(),
-						log_level.into(),
+						log_level.as_str().into(),
 						("--pool-type=fork-aware").into(),
 						("--trie-cache-size=32212254720").into(),
 						("--rpc-max-subscriptions-per-connection=327680").into(),
