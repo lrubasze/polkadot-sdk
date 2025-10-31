@@ -193,8 +193,10 @@ async fn setup_network() -> Result<Network<LocalFileSystem>, anyhow::Error> {
 				.with_validator(|node| node.with_name("validator-1"))
 		})
 		.with_parachain(|p| {
+			let parachain_cmd = std::env::var("PARACHAIN_CMD")
+				.unwrap_or("polkadot-parachain".to_string());
 			p.with_id(2000)
-				.with_default_command("polkadot-parachain")
+				.with_default_command(&parachain_cmd)
 				.with_default_image(
 					std::env::var("COL_IMAGE")
 						.unwrap_or("docker.io/paritypr/colander:latest".to_string())
