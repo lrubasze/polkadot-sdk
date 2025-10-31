@@ -177,12 +177,24 @@ where
 	eprintln!("prepare_subscriber max_level = {max_level:?}");
 
 	// Configure interest cache from environment variable
-	// - Not set: disabled
+	// - Not set or "none"/"disabled"/"no"/"false": disabled
 	// - "default": enabled with default config
 	// - "key=value,key=value": enabled with custom config
 	let mut log_tracer = tracing_log::LogTracer::builder().with_max_level(max_level);
 
-	if let Ok(interest_cache_config) = std::env::var("INTEREST_CACHE") {
+	let interest_cache_config = std::env::var("INTEREST_CACHE").ok();
+
+	// Check if interest cache should be enabled
+	let enable_cache = match interest_cache_config.as_deref() {
+		None => false, // Not set
+		Some(val) => {
+			let val_lower = val.to_lowercase();
+			!matches!(val_lower.as_str(), "none" | "disabled" | "no" | "false")
+		},
+	};
+
+	if enable_cache {
+		let interest_cache_config = interest_cache_config.unwrap();
 		eprintln!("prepare_subscriber interest-cache: enabled");
 
 		let mut cache_config = tracing_log::InterestCacheConfig::default();
