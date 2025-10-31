@@ -1495,9 +1495,9 @@ zeroize = { version = "1.7.0", default-features = false }
 # zombienet-configuration = { version = "0.3.13" }
 # zombienet-orchestrator = { version = "0.3.13" }
 # zombienet-sdk = { version = "0.3.13" }
-zombienet-configuration = { path = "../zombienet-sdk/crates/configuration" }
-zombienet-orchestrator = { path = "../zombienet-sdk/crates/orchestrator" }
-zombienet-sdk = { path = "../zombienet-sdk/crates/sdk" }
+zombienet-configuration = { git = "https://github.com/paritytech/zombienet-sdk.git", rev = "6bbab07" }
+zombienet-orchestrator = { git = "https://github.com/paritytech/zombienet-sdk.git", rev = "6bbab07" }
+zombienet-sdk = { git = "https://github.com/paritytech/zombienet-sdk.git", rev = "6bbab07" }
 zstd = { version = "0.12.4", default-features = false }
 
 [profile.release]
