@@ -174,6 +174,9 @@ where
 	let max_level_hint = Layer::<FmtSubscriber>::max_level_hint(&env_filter);
 	let max_level = to_log_level_filter(max_level_hint);
 
+	eprintln!("prepare_subscriber max_level = {max_level:?}");
+	eprintln!("prepare_subscriber interest-cache: disabled");
+
 	tracing_log::LogTracer::builder().with_max_level(max_level).init()?;
 
 	// If we're only logging `INFO` entries then we'll use a simplified logging format.
