@@ -202,9 +202,10 @@ async fn setup_network() -> Result<Network<LocalFileSystem>, anyhow::Error> {
 				)
 				.with_chain("asset-hub-westend-local")
 				.with_collator(|n| {
+					let log_level = std::env::var("COLLATOR_LOG").unwrap_or("-linfo".to_string());
 					n.with_name("collator").validator(true).with_args(vec![
 						("--warm-up-trie-cache").into(),
-						("-linfo").into(),
+						log_level.into(),
 						("--pool-type=fork-aware").into(),
 						("--trie-cache-size=32212254720").into(),
 						("--rpc-max-subscriptions-per-connection=327680").into(),
