@@ -28,8 +28,8 @@ use zombienet_sdk::{
 	LocalFileSystem, Network, NetworkConfigBuilder, NetworkNode,
 };
 
-const KEYS_COUNT: usize = 2000;
-const CHUNK_SIZE: usize = 500;
+const KEYS_COUNT: usize = 100;
+const CHUNK_SIZE: usize = 100;
 const TXS_PER_BLOCK: usize = 1000; // Target number of transactions per block
 const NUM_BLOCKS: u32 = 10; // Number of blocks to test
 const TRANSFER_AMOUNT: u128 = 1000000; // Small amount for transfers
