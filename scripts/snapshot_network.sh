@@ -1,5 +1,5 @@
 #!/bin/bash
-# snapshot_network.sh - Create and restore Polkadot/Parachain network snapshots
+# snapshot_network.sh - Create and restore complete Polkadot/Parachain network snapshots
 
 set -e
 
@@ -12,6 +12,7 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 usage() {
@@ -21,6 +22,7 @@ Usage: $0 <command> [options]
 Commands:
     create <name>           Create a new snapshot
     restore <name>          Restore from a snapshot
+    launch <name>           Show/execute launch command for snapshot
     list                    List all snapshots
     delete <name>           Delete a snapshot
     info <name>             Show snapshot information
@@ -30,30 +32,48 @@ Options:
     --chain <chain>         Chain name (default: dev)
     --compression <type>    Compression: none, gzip, zstd (default: gzip)
 
+    Complete Snapshot Options:
+    --include-specs         Include chain spec file(s) in snapshot
+    --include-binary        Include node binary in snapshot
+    --spec-file <path>      Path to chain spec file
+    --binary-path <path>    Path to node binary (default: auto-detect)
+
     Parachain Options:
     --parachain             Enable parachain mode (snapshot both relay + para)
     --relay-chain <chain>   Relay chain name (e.g., rococo_local_testnet)
     --para-id <id>          Parachain ID (e.g., 2000)
     --para-chain <chain>    Parachain chain name (default: local_testnet)
+    --relay-spec <path>     Path to relay chain spec file
+    --para-spec <path>      Path to parachain spec file
+
+    Launch Options:
+    --exec                  Execute the launch command (for 'launch' command)
+    --extra-args <args>     Extra arguments to pass to node
 
 Examples:
-    # Create snapshot (relay chain or dev)
-    $0 create my-snapshot --chain dev
+    # Create simple snapshot with specs and binary
+    $0 create complete-snap --chain dev \\
+        --include-specs --spec-file ./chain-spec.json \\
+        --include-binary --binary-path ./target/release/polkadot
 
-    # Create parachain snapshot (both relay + parachain)
-    $0 create para-snapshot --parachain \\
+    # Create parachain snapshot with everything
+    $0 create para-complete --parachain \\
         --relay-chain rococo_local_testnet \\
         --para-id 2000 \\
-        --para-chain local_testnet
+        --include-specs \\
+        --relay-spec ./rococo-local.json \\
+        --para-spec ./para-2000.json \\
+        --include-binary
 
-    # Restore snapshot
-    $0 restore my-snapshot --base-path /tmp/polkadot-test
+    # Restore and show launch command
+    $0 restore complete-snap --base-path /tmp/test
+    $0 launch complete-snap
+
+    # Restore and launch immediately
+    $0 launch complete-snap --exec
 
     # List snapshots
     $0 list
-
-    # Show snapshot info
-    $0 info para-snapshot
 EOF
     exit 1
 }
@@ -68,6 +88,14 @@ PARACHAIN_MODE=false
 RELAY_CHAIN=""
 PARA_ID=""
 PARA_CHAIN="local_testnet"
+INCLUDE_SPECS=false
+INCLUDE_BINARY=false
+SPEC_FILE=""
+RELAY_SPEC=""
+PARA_SPEC=""
+BINARY_PATH=""
+EXEC_LAUNCH=false
+EXTRA_ARGS=""
 
 shift 2 2>/dev/null || true
 
@@ -101,6 +129,38 @@ while [[ $# -gt 0 ]]; do
             PARA_CHAIN="$2"
             shift 2
             ;;
+        --include-specs)
+            INCLUDE_SPECS=true
+            shift
+            ;;
+        --include-binary)
+            INCLUDE_BINARY=true
+            shift
+            ;;
+        --spec-file)
+            SPEC_FILE="$2"
+            shift 2
+            ;;
+        --relay-spec)
+            RELAY_SPEC="$2"
+            shift 2
+            ;;
+        --para-spec)
+            PARA_SPEC="$2"
+            shift 2
+            ;;
+        --binary-path)
+            BINARY_PATH="$2"
+            shift 2
+            ;;
+        --exec)
+            EXEC_LAUNCH=true
+            shift
+            ;;
+        --extra-args)
+            EXTRA_ARGS="$2"
+            shift 2
+            ;;
         *)
             echo "Unknown option: $1"
             usage
@@ -110,6 +170,26 @@ done
 
 # Ensure snapshots directory exists
 mkdir -p "$SNAPSHOTS_DIR"
+
+# Auto-detect binary path if --include-binary but no path specified
+detect_binary_path() {
+    local binary_name=${1:-polkadot}
+
+    # Try common locations
+    for path in \
+        "./target/release/${binary_name}" \
+        "./target/production/${binary_name}" \
+        "../target/release/${binary_name}" \
+        "$(which ${binary_name} 2>/dev/null)"; do
+
+        if [[ -f "$path" ]] && [[ -x "$path" ]]; then
+            echo "$path"
+            return 0
+        fi
+    done
+
+    return 1
+}
 
 # Auto-detect parachain setup from base path
 detect_parachain_setup() {
@@ -183,6 +263,42 @@ create_simple_snapshot() {
     echo -e "${BLUE}Creating snapshot '$name'...${NC}"
     echo "Source: $source"
 
+    # Detect/validate binary if needed
+    local binary_info=""
+    if [[ "$INCLUDE_BINARY" == true ]]; then
+        if [[ -z "$BINARY_PATH" ]]; then
+            BINARY_PATH=$(detect_binary_path "polkadot")
+            if [[ $? -ne 0 ]]; then
+                echo -e "${RED}Error: Could not auto-detect binary. Use --binary-path${NC}"
+                exit 1
+            fi
+        fi
+
+        if [[ ! -f "$BINARY_PATH" ]] || [[ ! -x "$BINARY_PATH" ]]; then
+            echo -e "${RED}Error: Binary not found or not executable: $BINARY_PATH${NC}"
+            exit 1
+        fi
+
+        binary_info=$(${BINARY_PATH} --version 2>/dev/null | head -1 || echo "unknown")
+        echo -e "${CYAN}Including binary: $BINARY_PATH${NC}"
+        echo "  Version: $binary_info"
+    fi
+
+    # Validate spec file if needed
+    if [[ "$INCLUDE_SPECS" == true ]]; then
+        if [[ -z "$SPEC_FILE" ]]; then
+            echo -e "${RED}Error: --include-specs requires --spec-file${NC}"
+            exit 1
+        fi
+
+        if [[ ! -f "$SPEC_FILE" ]]; then
+            echo -e "${RED}Error: Spec file not found: $SPEC_FILE${NC}"
+            exit 1
+        fi
+
+        echo -e "${CYAN}Including spec: $SPEC_FILE${NC}"
+    fi
+
     # Save metadata
     cat > "$snapshot_dir/metadata.json" <<EOF
 {
@@ -192,12 +308,33 @@ create_simple_snapshot() {
   "created": "$(date -Iseconds)",
   "base_path": "$BASE_PATH",
   "source": "$source",
-  "compression": "$COMPRESSION"
+  "compression": "$COMPRESSION",
+  "includes": {
+    "specs": $INCLUDE_SPECS,
+    "binary": $INCLUDE_BINARY
+  },
+  "binary_info": "$binary_info",
+  "binary_name": "$(basename ${BINARY_PATH:-polkadot})"
 }
 EOF
 
     # Create snapshot based on compression type
     snapshot_directory "$source" "$snapshot_dir/data" "$CHAIN"
+
+    # Copy spec file if requested
+    if [[ "$INCLUDE_SPECS" == true ]]; then
+        mkdir -p "$snapshot_dir/specs"
+        cp "$SPEC_FILE" "$snapshot_dir/specs/chain-spec.json"
+        echo -e "${GREEN}✓ Spec file copied${NC}"
+    fi
+
+    # Copy binary if requested
+    if [[ "$INCLUDE_BINARY" == true ]]; then
+        mkdir -p "$snapshot_dir/bin"
+        cp "$BINARY_PATH" "$snapshot_dir/bin/$(basename $BINARY_PATH)"
+        chmod +x "$snapshot_dir/bin/$(basename $BINARY_PATH)"
+        echo -e "${GREEN}✓ Binary copied${NC}"
+    fi
 
     # Calculate size
     local size=$(du -sh "$snapshot_dir" | cut -f1)
@@ -246,6 +383,46 @@ create_parachain_snapshot() {
     echo "Relay chain: $relay_source"
     echo "Parachain:   $para_source"
 
+    # Detect/validate binary if needed
+    local binary_info=""
+    if [[ "$INCLUDE_BINARY" == true ]]; then
+        if [[ -z "$BINARY_PATH" ]]; then
+            BINARY_PATH=$(detect_binary_path "polkadot-parachain")
+            if [[ $? -ne 0 ]]; then
+                BINARY_PATH=$(detect_binary_path "polkadot")
+            fi
+            if [[ $? -ne 0 ]]; then
+                echo -e "${RED}Error: Could not auto-detect binary. Use --binary-path${NC}"
+                exit 1
+            fi
+        fi
+
+        binary_info=$(${BINARY_PATH} --version 2>/dev/null | head -1 || echo "unknown")
+        echo -e "${CYAN}Including binary: $BINARY_PATH${NC}"
+        echo "  Version: $binary_info"
+    fi
+
+    # Validate spec files if needed
+    if [[ "$INCLUDE_SPECS" == true ]]; then
+        if [[ -z "$RELAY_SPEC" ]] || [[ -z "$PARA_SPEC" ]]; then
+            echo -e "${RED}Error: Parachain --include-specs requires --relay-spec and --para-spec${NC}"
+            exit 1
+        fi
+
+        if [[ ! -f "$RELAY_SPEC" ]]; then
+            echo -e "${RED}Error: Relay spec not found: $RELAY_SPEC${NC}"
+            exit 1
+        fi
+
+        if [[ ! -f "$PARA_SPEC" ]]; then
+            echo -e "${RED}Error: Para spec not found: $PARA_SPEC${NC}"
+            exit 1
+        fi
+
+        echo -e "${CYAN}Including relay spec: $RELAY_SPEC${NC}"
+        echo -e "${CYAN}Including para spec: $PARA_SPEC${NC}"
+    fi
+
     # Save metadata
     cat > "$snapshot_dir/metadata.json" <<EOF
 {
@@ -256,7 +433,13 @@ create_parachain_snapshot() {
   "para_chain": "$(basename $para_source)",
   "created": "$(date -Iseconds)",
   "base_path": "$BASE_PATH",
-  "compression": "$COMPRESSION"
+  "compression": "$COMPRESSION",
+  "includes": {
+    "specs": $INCLUDE_SPECS,
+    "binary": $INCLUDE_BINARY
+  },
+  "binary_info": "$binary_info",
+  "binary_name": "$(basename ${BINARY_PATH:-polkadot-parachain})"
 }
 EOF
 
@@ -274,6 +457,22 @@ EOF
     if [[ -d "${BASE_PATH}/keystore" ]]; then
         echo -e "${BLUE}Snapshotting keystore...${NC}"
         cp -a "${BASE_PATH}/keystore" "$snapshot_dir/keystore"
+    fi
+
+    # Copy spec files if requested
+    if [[ "$INCLUDE_SPECS" == true ]]; then
+        mkdir -p "$snapshot_dir/specs"
+        cp "$RELAY_SPEC" "$snapshot_dir/specs/relay-spec.json"
+        cp "$PARA_SPEC" "$snapshot_dir/specs/para-spec.json"
+        echo -e "${GREEN}✓ Spec files copied${NC}"
+    fi
+
+    # Copy binary if requested
+    if [[ "$INCLUDE_BINARY" == true ]]; then
+        mkdir -p "$snapshot_dir/bin"
+        cp "$BINARY_PATH" "$snapshot_dir/bin/$(basename $BINARY_PATH)"
+        chmod +x "$snapshot_dir/bin/$(basename $BINARY_PATH)"
+        echo -e "${GREEN}✓ Binary copied${NC}"
     fi
 
     # Calculate sizes
@@ -366,6 +565,8 @@ restore_simple_snapshot() {
     # Read metadata
     local compression=$(jq -r '.compression' "$snapshot_dir/metadata.json" 2>/dev/null || echo "gzip")
     local stored_chain=$(jq -r '.chain' "$snapshot_dir/metadata.json" 2>/dev/null || echo "$CHAIN")
+    local has_specs=$(jq -r '.includes.specs' "$snapshot_dir/metadata.json" 2>/dev/null || echo "false")
+    local has_binary=$(jq -r '.includes.binary' "$snapshot_dir/metadata.json" 2>/dev/null || echo "false")
 
     # Create parent directory
     mkdir -p "$BASE_PATH/chains"
@@ -373,11 +574,28 @@ restore_simple_snapshot() {
     # Restore based on compression type
     restore_directory "$snapshot_dir/data" "$BASE_PATH/chains" "$stored_chain" "$compression"
 
-    echo -e "${GREEN}✓ Snapshot restored${NC}"
+    echo -e "${GREEN}✓ Chain data restored${NC}"
     echo "Target: $target"
+
+    # Show what else is available
+    if [[ "$has_specs" == "true" ]]; then
+        echo -e "${CYAN}✓ Chain spec available: $snapshot_dir/specs/chain-spec.json${NC}"
+    fi
+
+    if [[ "$has_binary" == "true" ]]; then
+        local binary_name=$(jq -r '.binary_name' "$snapshot_dir/metadata.json")
+        echo -e "${CYAN}✓ Binary available: $snapshot_dir/bin/$binary_name${NC}"
+        local binary_info=$(jq -r '.binary_info' "$snapshot_dir/metadata.json")
+        echo "  Version: $binary_info"
+    fi
+
     echo ""
-    echo "To launch node:"
-    echo "  ./target/release/polkadot --chain $CHAIN --base-path $BASE_PATH"
+    echo -e "${YELLOW}To launch node:${NC}"
+    if [[ "$has_binary" == "true" && "$has_specs" == "true" ]]; then
+        echo "  $0 launch $name"
+    else
+        echo "  ./target/release/polkadot --chain $CHAIN --base-path $BASE_PATH"
+    fi
 }
 
 restore_parachain_snapshot() {
@@ -389,6 +607,8 @@ restore_parachain_snapshot() {
     local para_id=$(jq -r '.para_id' "$snapshot_dir/metadata.json")
     local para_chain=$(jq -r '.para_chain' "$snapshot_dir/metadata.json")
     local compression=$(jq -r '.compression' "$snapshot_dir/metadata.json" 2>/dev/null || echo "gzip")
+    local has_specs=$(jq -r '.includes.specs' "$snapshot_dir/metadata.json" 2>/dev/null || echo "false")
+    local has_binary=$(jq -r '.includes.binary' "$snapshot_dir/metadata.json" 2>/dev/null || echo "false")
 
     local relay_target="${BASE_PATH}/chains/${relay_chain}"
     local para_target="${BASE_PATH}/chains/${para_chain}"
@@ -428,17 +648,35 @@ restore_parachain_snapshot() {
         cp -a "$snapshot_dir/keystore" "${BASE_PATH}/keystore"
     fi
 
-    echo -e "${GREEN}✓ Parachain snapshot restored${NC}"
+    echo -e "${GREEN}✓ Parachain data restored${NC}"
     echo "Relay chain: $relay_target"
     echo "Parachain:   $para_target"
+
+    # Show what else is available
+    if [[ "$has_specs" == "true" ]]; then
+        echo -e "${CYAN}✓ Relay spec: $snapshot_dir/specs/relay-spec.json${NC}"
+        echo -e "${CYAN}✓ Para spec: $snapshot_dir/specs/para-spec.json${NC}"
+    fi
+
+    if [[ "$has_binary" == "true" ]]; then
+        local binary_name=$(jq -r '.binary_name' "$snapshot_dir/metadata.json")
+        echo -e "${CYAN}✓ Binary: $snapshot_dir/bin/$binary_name${NC}"
+        local binary_info=$(jq -r '.binary_info' "$snapshot_dir/metadata.json")
+        echo "  Version: $binary_info"
+    fi
+
     echo ""
-    echo "To launch collator:"
-    echo "  ./target/release/polkadot-parachain \\"
-    echo "    --collator \\"
-    echo "    --base-path $BASE_PATH \\"
-    echo "    --chain <para-spec> \\"
-    echo "    -- \\"
-    echo "    --chain <relay-spec>"
+    echo -e "${YELLOW}To launch collator:${NC}"
+    if [[ "$has_binary" == "true" && "$has_specs" == "true" ]]; then
+        echo "  $0 launch $name"
+    else
+        echo "  ./target/release/polkadot-parachain \\"
+        echo "    --collator \\"
+        echo "    --base-path $BASE_PATH \\"
+        echo "    --chain <para-spec> \\"
+        echo "    -- \\"
+        echo "    --chain <relay-spec>"
+    fi
 }
 
 restore_directory() {
@@ -463,6 +701,98 @@ restore_directory() {
     esac
 }
 
+launch_snapshot() {
+    local name=$1
+    local snapshot_dir="${SNAPSHOTS_DIR}/${name}"
+
+    if [[ -z "$name" ]]; then
+        echo -e "${RED}Error: Snapshot name required${NC}"
+        usage
+    fi
+
+    if [[ ! -d "$snapshot_dir" ]]; then
+        echo -e "${RED}Error: Snapshot '$name' not found${NC}"
+        exit 1
+    fi
+
+    # Read metadata
+    local snapshot_type=$(jq -r '.type' "$snapshot_dir/metadata.json" 2>/dev/null || echo "simple")
+    local has_specs=$(jq -r '.includes.specs' "$snapshot_dir/metadata.json" 2>/dev/null || echo "false")
+    local has_binary=$(jq -r '.includes.binary' "$snapshot_dir/metadata.json" 2>/dev/null || echo "false")
+
+    if [[ "$has_binary" != "true" ]] || [[ "$has_specs" != "true" ]]; then
+        echo -e "${RED}Error: Snapshot does not include binary and/or specs${NC}"
+        echo "Snapshot must be created with --include-binary and --include-specs"
+        exit 1
+    fi
+
+    if [[ "$snapshot_type" == "parachain" ]]; then
+        launch_parachain_snapshot "$name" "$snapshot_dir"
+    else
+        launch_simple_snapshot "$name" "$snapshot_dir"
+    fi
+}
+
+launch_simple_snapshot() {
+    local name=$1
+    local snapshot_dir=$2
+
+    local chain=$(jq -r '.chain' "$snapshot_dir/metadata.json")
+    local binary_name=$(jq -r '.binary_name' "$snapshot_dir/metadata.json")
+    local binary_path="$snapshot_dir/bin/$binary_name"
+    local spec_path="$snapshot_dir/specs/chain-spec.json"
+
+    local launch_cmd="$binary_path --chain $spec_path --base-path $BASE_PATH"
+
+    if [[ -n "$EXTRA_ARGS" ]]; then
+        launch_cmd="$launch_cmd $EXTRA_ARGS"
+    fi
+
+    echo -e "${BLUE}Launch command for snapshot '$name':${NC}"
+    echo ""
+    echo "  $launch_cmd"
+    echo ""
+
+    if [[ "$EXEC_LAUNCH" == true ]]; then
+        echo -e "${GREEN}Executing...${NC}"
+        exec $launch_cmd
+    else
+        echo -e "${YELLOW}Use --exec to execute this command${NC}"
+    fi
+}
+
+launch_parachain_snapshot() {
+    local name=$1
+    local snapshot_dir=$2
+
+    local relay_chain=$(jq -r '.relay_chain' "$snapshot_dir/metadata.json")
+    local para_id=$(jq -r '.para_id' "$snapshot_dir/metadata.json")
+    local binary_name=$(jq -r '.binary_name' "$snapshot_dir/metadata.json")
+    local binary_path="$snapshot_dir/bin/$binary_name"
+    local relay_spec="$snapshot_dir/specs/relay-spec.json"
+    local para_spec="$snapshot_dir/specs/para-spec.json"
+
+    local launch_cmd="$binary_path --collator --base-path $BASE_PATH --chain $para_spec"
+
+    if [[ -n "$EXTRA_ARGS" ]]; then
+        launch_cmd="$launch_cmd $EXTRA_ARGS"
+    fi
+
+    launch_cmd="$launch_cmd -- --chain $relay_spec"
+
+    echo -e "${BLUE}Launch command for parachain snapshot '$name':${NC}"
+    echo ""
+    echo "  $launch_cmd"
+    echo ""
+
+    if [[ "$EXEC_LAUNCH" == true ]]; then
+        echo -e "${GREEN}Executing...${NC}"
+        exec $launch_cmd
+    else
+        echo -e "${YELLOW}Use --exec to execute this command${NC}"
+    fi
+}
+
 list_snapshots() {
     echo -e "${BLUE}Available snapshots:${NC}"
     echo ""
@@ -472,14 +802,21 @@ list_snapshots() {
         return
     fi
 
-    printf "%-20s %-10s %-20s %-20s %-10s\n" "NAME" "TYPE" "CHAIN/RELAY" "CREATED" "SIZE"
-    printf "%-20s %-10s %-20s %-20s %-10s\n" "----" "----" "-----------" "-------" "----"
+    printf "%-20s %-10s %-20s %-20s %-10s %-8s\n" "NAME" "TYPE" "CHAIN/RELAY" "CREATED" "SIZE" "COMPLETE"
+    printf "%-20s %-10s %-20s %-20s %-10s %-8s\n" "----" "----" "-----------" "-------" "----" "--------"
 
     for snapshot in "$SNAPSHOTS_DIR"/*; do
         if [[ -d "$snapshot" ]]; then
             local name=$(basename "$snapshot")
             local type=$(jq -r '.type' "$snapshot/metadata.json" 2>/dev/null || echo "simple")
             local created=$(jq -r '.created' "$snapshot/metadata.json" 2>/dev/null | cut -d'T' -f1 || echo "unknown")
+            local has_specs=$(jq -r '.includes.specs' "$snapshot/metadata.json" 2>/dev/null || echo "false")
+            local has_binary=$(jq -r '.includes.binary' "$snapshot/metadata.json" 2>/dev/null || echo "false")
+
+            local complete="No"
+            if [[ "$has_specs" == "true" && "$has_binary" == "true" ]]; then
+                complete="Yes"
+            fi
 
             if [[ "$type" == "parachain" ]]; then
                 local relay=$(jq -r '.relay_chain' "$snapshot/metadata.json" 2>/dev/null || echo "unknown")
@@ -492,9 +829,12 @@ list_snapshots() {
                 local chain_info="$chain"
             fi
 
-            printf "%-20s %-10s %-20s %-20s %-10s\n" "$name" "$type" "$chain_info" "$created" "$size"
+            printf "%-20s %-10s %-20s %-20s %-10s %-8s\n" "$name" "$type" "$chain_info" "$created" "$size" "$complete"
         fi
     done
+
+    echo ""
+    echo -e "${CYAN}Note: 'Complete' means snapshot includes specs and binary${NC}"
 }
 
 delete_snapshot() {
@@ -558,6 +898,17 @@ show_info() {
     echo ""
     echo "Contents:"
     tree -L 2 "$snapshot_dir" 2>/dev/null || ls -lh "$snapshot_dir"
+
+    # Check if launchable
+    local has_specs=$(jq -r '.includes.specs' "$snapshot_dir/metadata.json" 2>/dev/null || echo "false")
+    local has_binary=$(jq -r '.includes.binary' "$snapshot_dir/metadata.json" 2>/dev/null || echo "false")
+
+    echo ""
+    if [[ "$has_specs" == "true" && "$has_binary" == "true" ]]; then
+        echo -e "${GREEN}✓ This snapshot can be launched with: $0 launch $name${NC}"
+    else
+        echo -e "${YELLOW}⚠ This snapshot is incomplete (missing specs or binary)${NC}"
+    fi
 }
 
 # Main
@@ -567,6 +918,9 @@ case $COMMAND in
         ;;
     restore)
         restore_snapshot "$SNAPSHOT_NAME"
+        ;;
+    launch)
+        launch_snapshot "$SNAPSHOT_NAME"
         ;;
     list)
         list_snapshots
