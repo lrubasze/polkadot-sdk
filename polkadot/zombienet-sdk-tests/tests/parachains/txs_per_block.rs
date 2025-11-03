@@ -105,8 +105,7 @@ async fn txs_per_block_test() -> Result<(), anyhow::Error> {
 			};
 
 			// Create transfer transaction
-			let call =
-				ahw::tx().balances().transfer_keep_alive(recipient_account, TRANSFER_AMOUNT);
+			let call = ahw::tx().balances().transfer_keep_alive(recipient_account, TRANSFER_AMOUNT);
 			let params = tx_params(sender_nonce);
 
 			match para_client.tx().create_signed(&call, sender_key, params).await {
@@ -193,8 +192,8 @@ async fn setup_network() -> Result<Network<LocalFileSystem>, anyhow::Error> {
 				.with_validator(|node| node.with_name("validator-1"))
 		})
 		.with_parachain(|p| {
-			let parachain_cmd = std::env::var("PARACHAIN_CMD")
-				.unwrap_or("polkadot-parachain".to_string());
+			let parachain_cmd =
+				std::env::var("PARACHAIN_CMD").unwrap_or("polkadot-parachain".to_string());
 			p.with_id(2000)
 				.with_default_command(parachain_cmd.as_str())
 				.with_default_image(
@@ -205,16 +204,21 @@ async fn setup_network() -> Result<Network<LocalFileSystem>, anyhow::Error> {
 				.with_chain("asset-hub-westend-local")
 				.with_collator(|n| {
 					let log_level = std::env::var("COLLATOR_LOG").unwrap_or("-linfo".to_string());
-					n.with_name("collator").validator(true).with_args(vec![
-						("--warm-up-trie-cache").into(),
-						log_level.as_str().into(),
-						("--pool-type=fork-aware").into(),
-						("--trie-cache-size=32212254720").into(),
-						("--rpc-max-subscriptions-per-connection=327680").into(),
-						("--rpc-max-connections=102400".into()),
-						("--pool-limit=819200").into(),
-						("--pool-kbytes=2048000").into(),
-					])
+					let interest_cache =
+						std::env::var("INTEREST_CACHE").unwrap_or("disabled".to_string());
+					n.with_name("collator")
+						.validator(true)
+						.with_args(vec![
+							("--warm-up-trie-cache").into(),
+							log_level.as_str().into(),
+							("--pool-type=fork-aware").into(),
+							("--trie-cache-size=32212254720").into(),
+							("--rpc-max-subscriptions-per-connection=327680").into(),
+							("--rpc-max-connections=102400".into()),
+							("--pool-limit=819200").into(),
+							("--pool-kbytes=2048000").into(),
+						])
+						.with_env(vec![("INTEREST_CACHE", interest_cache.as_str())])
 				})
 		})
 		.build()
