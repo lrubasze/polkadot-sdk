@@ -47,7 +47,12 @@ LOG_NAMES=(
 # Generate timestamp for this run
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
-# Create global results CSV file
+# Create output directory for this run
+OUTPUT_DIR="run_${TIMESTAMP}"
+mkdir -p "$OUTPUT_DIR"
+echo "Created output directory: $OUTPUT_DIR"
+
+# Create global results CSV file (in current directory, not in OUTPUT_DIR)
 RESULTS_FILE="results_${TIMESTAMP}.csv"
 echo "interest_cache,log_level,proposal_min_ms,proposal_max_ms,proposal_avg_ms,cpu_min_pct,cpu_max_pct,cpu_avg_pct" > "$RESULTS_FILE"
 echo "Created global results file: $RESULTS_FILE"
@@ -70,10 +75,11 @@ run_test() {
     echo "  INTEREST_CACHE: $interest_cache_config"
     echo "  LOG_LEVEL: $log_level"
     echo "  OUTPUT: $output_name"
+    echo "  OUTPUT_DIR: $OUTPUT_DIR"
     echo "========================================"
 
-    # Call test.sh with parameters (including global results file)
-    ./test.sh "$interest_cache_config" "$log_level" "$output_name" "$RESULTS_FILE"
+    # Call test.sh with parameters (including global results file and output directory)
+    ./test.sh "$interest_cache_config" "$log_level" "$output_name" "$RESULTS_FILE" "$OUTPUT_DIR"
 
     echo ""
 }
@@ -111,9 +117,10 @@ echo "Run timestamp: $TIMESTAMP"
 echo "========================================"
 echo ""
 echo "Global results file: $RESULTS_FILE"
+echo "Output directory: $OUTPUT_DIR"
 echo ""
-echo "Generated files (summary, top, collator logs):"
-ls -lh *${TIMESTAMP}*.log 2>/dev/null || echo "No log files found with timestamp $TIMESTAMP"
+echo "Generated files in $OUTPUT_DIR:"
+ls -lh "$OUTPUT_DIR"/*.log "$OUTPUT_DIR"/*.txt 2>/dev/null | awk '{print $9, $5}' || echo "No files found"
 echo ""
 echo "View consolidated results:"
 echo "  cat $RESULTS_FILE"

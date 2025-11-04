@@ -6,6 +6,7 @@ INTEREST_CACHE=${1:-disabled}
 LOG_LEVEL=${2:-info,alexgg=debug,parachain=debug}
 OUTPUT=${3:-output}
 RESULTS_FILE=${4:-""}
+OUTPUT_DIR=${5:-"."}
 
 TEST_DIR=test1
 TSTAMP=$(date +%Y%m%d_%H%M%S)
@@ -15,7 +16,7 @@ TSTAMP=$(date +%Y%m%d_%H%M%S)
 
 sleep 2
 COLLATOR_LOG=${TEST_DIR}/collator.log
-TOP_OUTPUT="top_${OUTPUT}.log"
+TOP_OUTPUT="${OUTPUT_DIR}/top_${OUTPUT}.log"
 # launch collator
 INTEREST_CACHE=$INTEREST_CACHE ./node_launch.sh $TEST_DIR collator $LOG_LEVEL $TOP_OUTPUT
 
@@ -38,7 +39,7 @@ TX_END_TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 echo "TX_DONE: $TX_END_TIMESTAMP (epoch: $TX_END_TIME)"
 
 # Save timestamps to a marker file for later use
-TIMESTAMP_FILE="timestamps_${OUTPUT}.txt"
+TIMESTAMP_FILE="${OUTPUT_DIR}/timestamps_${OUTPUT}.txt"
 cat > "$TIMESTAMP_FILE" <<EOF
 TX_START_TIME="$TX_START_TIME"
 TX_START_TIMESTAMP="$TX_START_TIMESTAMP"
@@ -49,12 +50,12 @@ echo "Timestamps saved to: $TIMESTAMP_FILE"
 
 pkill -9 polkadot polkadot-parachain top
 
-COLLATOR_LOG="collator_${OUTPUT}.log"
+COLLATOR_LOG="${OUTPUT_DIR}/collator_${OUTPUT}.log"
 
 cp $TEST_DIR/collator.log  $COLLATOR_LOG
 
 # Create summary output file
-SUMMARY_OUTPUT="summary_${OUTPUT}.log"
+SUMMARY_OUTPUT="${OUTPUT_DIR}/summary_${OUTPUT}.log"
 
 # Load timestamps
 source "$TIMESTAMP_FILE"
