@@ -22,14 +22,29 @@ INTEREST_CACHE=$INTEREST_CACHE ./node_launch.sh $TEST_DIR collator $LOG_LEVEL $T
 sleep 60
 
 # submit_transactions
-RUST_LOG=info,zombienet_orchestrator=debug
-ZOMBIE_PROVIDER=native
 
-echo "tx_start" > $TOP_OUTPUT
-echo "tx_start" >> $COLLATOR_LOG
+# Record timestamps for filtering logs (more reliable than writing markers to active log files)
+TX_START_TIME=$(date +%s)
+TX_START_TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+echo "TX_START: $TX_START_TIMESTAMP (epoch: $TX_START_TIME)"
+
+RUST_LOG=info,zombienet_orchestrator=debug \
+ZOMBIE_PROVIDER=native \
 cargo nextest run --release -p polkadot-zombienet-sdk-tests --features zombie-metadata,zombie-ci --no-capture txs_per_block_test_2
-echo "tx_done" >> $TOP_OUTPUT
-echo "tx_done" >> $COLLATOR_LOG
+
+TX_END_TIME=$(date +%s)
+TX_END_TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+echo "TX_DONE: $TX_END_TIMESTAMP (epoch: $TX_END_TIME)"
+
+# Save timestamps to a marker file for later use
+TIMESTAMP_FILE="timestamps_${OUTPUT}.txt"
+cat > "$TIMESTAMP_FILE" <<EOF
+TX_START_TIME="$TX_START_TIME"
+TX_START_TIMESTAMP="$TX_START_TIMESTAMP"
+TX_END_TIME="$TX_END_TIME"
+TX_END_TIMESTAMP="$TX_END_TIMESTAMP"
+EOF
+echo "Timestamps saved to: $TIMESTAMP_FILE"
 
 pkill -9 polkadot polkadot-parachain top
 
@@ -40,23 +55,38 @@ cp $TEST_DIR/collator.log  $COLLATOR_LOG
 # Create summary output file
 SUMMARY_OUTPUT="summary_${OUTPUT}.log"
 
+# Load timestamps
+source "$TIMESTAMP_FILE"
+
 # process COLLATOR_LOG and TOP_OUTPUT
 {
 echo ""
 echo "========================================"
 echo "  Performance Analysis Results"
+echo "  Time Range: $TX_START_TIMESTAMP to $TX_END_TIMESTAMP"
 echo "========================================"
 echo ""
 
 # Process CPU metrics from TOP_OUTPUT
 echo "--- CPU Usage Analysis ---"
-awk '/tx_start/,/tx_done/ {
-    if ($2 ~ /^[0-9]+\.?[0-9]*$/) {
-        cpu = $2
-        sum += cpu
-        count++
-        if (cpu > max || max == "") max = cpu
-        if (cpu < min || min == "") min = cpu
+echo "Filtering by timestamp range: $TX_START_TIMESTAMP to $TX_END_TIMESTAMP"
+
+# TOP output format: YYYY-MM-DD HH:MM:SS PID CPU MEM
+# After timestamp filtering, CPU is in column 4
+awk -v start_ts="$TX_START_TIMESTAMP" -v end_ts="$TX_END_TIMESTAMP" '
+{
+    # Extract timestamp from first two columns (YYYY-MM-DD HH:MM:SS)
+    if (NF >= 5 && match($1, /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)) {
+        log_ts = $1 " " $2
+        if (log_ts >= start_ts && log_ts <= end_ts) {
+            cpu = $4
+            if (cpu ~ /^[0-9]+\.?[0-9]*$/) {
+                sum += cpu
+                count++
+                if (cpu > max || max == "") max = cpu
+                if (cpu < min || min == "") min = cpu
+            }
+        }
     }
 }
 END {
@@ -66,15 +96,25 @@ END {
         printf "Min CPU: %.2f%%\n", min
         printf "Max CPU: %.2f%%\n", max
     } else {
-        print "No CPU data found"
+        print "No CPU data found in time range"
     }
 }' $TOP_OUTPUT
 
 echo ""
 echo "--- Block Preparation Metrics ---"
+echo "Filtering by timestamp range: $TX_START_TIMESTAMP to $TX_END_TIMESTAMP"
 
-# Extract block metrics between markers
-awk '/tx_start/,/tx_done/' $COLLATOR_LOG | \
+# Extract block metrics using timestamp filtering
+awk -v start_ts="$TX_START_TIMESTAMP" -v end_ts="$TX_END_TIMESTAMP" '
+{
+    # Extract timestamp from log line (format: YYYY-MM-DD HH:MM:SS)
+    if (match($0, /^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}/)) {
+        log_ts = substr($0, RSTART, RLENGTH)
+        if (log_ts >= start_ts && log_ts <= end_ts) {
+            print $0
+        }
+    }
+}' $COLLATOR_LOG | \
 grep "Prepared block for propo" | \
 sed -E 's/.*at ([0-9]+).*\(([0-9]+) ms\).*extrinsics \(([0-9]+)\).*/\1 \2 \3/' | \
 awk '{
@@ -106,5 +146,6 @@ echo "Full logs available:"
 echo "  TOP: $TOP_OUTPUT"
 echo "  Collator: $COLLATOR_LOG"
 echo "  Summary: $SUMMARY_OUTPUT"
+echo "  Timestamps: $TIMESTAMP_FILE"
 echo "========================================"
 } | tee "$SUMMARY_OUTPUT"

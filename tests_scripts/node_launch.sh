@@ -68,6 +68,11 @@ echo "tail -f $log_file"
 
 if [ "$MONITOR_OUTPUT" != "none" ]; then
     echo "monitoring  pid=$pid monitor_output=$MONITOR_OUTPUT"
-    top -pid $pid -stats pid,cpu,mem -l0 | grep --line-buffered $pid >${MONITOR_OUTPUT} &
+    # Add timestamps to top output for later filtering
+    top -pid $pid -stats pid,cpu,mem -l0 | \
+        grep --line-buffered $pid | \
+        while IFS= read -r line; do
+            echo "$(date '+%Y-%m-%d %H:%M:%S') $line"
+        done >${MONITOR_OUTPUT} &
     echo "node monitor pid = $!"
 fi
