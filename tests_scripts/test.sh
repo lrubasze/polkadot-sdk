@@ -5,6 +5,7 @@ set -e
 INTEREST_CACHE=${1:-disabled}
 LOG_LEVEL=${2:-info,alexgg=debug,parachain=debug}
 OUTPUT=${3:-output}
+RESULTS_FILE=${4:-""}
 
 TEST_DIR=test1
 TSTAMP=$(date +%Y%m%d_%H%M%S)
@@ -73,7 +74,7 @@ echo "Filtering by timestamp range: $TX_START_TIMESTAMP to $TX_END_TIMESTAMP"
 
 # TOP output format: YYYY-MM-DD HH:MM:SS PID CPU MEM
 # After timestamp filtering, CPU is in column 4
-awk -v start_ts="$TX_START_TIMESTAMP" -v end_ts="$TX_END_TIMESTAMP" '
+CPU_ANALYSIS=$(awk -v start_ts="$TX_START_TIMESTAMP" -v end_ts="$TX_END_TIMESTAMP" '
 {
     # Extract timestamp from first two columns (YYYY-MM-DD HH:MM:SS)
     if (NF >= 5 && match($1, /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)) {
@@ -98,14 +99,21 @@ END {
     } else {
         print "No CPU data found in time range"
     }
-}' $TOP_OUTPUT
+}' $TOP_OUTPUT)
+
+echo "$CPU_ANALYSIS"
+
+# Extract CPU values for CSV (remove % sign)
+CPU_MIN=$(echo "$CPU_ANALYSIS" | grep "Min CPU:" | awk '{print $3}' | tr -d '%')
+CPU_MAX=$(echo "$CPU_ANALYSIS" | grep "Max CPU:" | awk '{print $3}' | tr -d '%')
+CPU_AVG=$(echo "$CPU_ANALYSIS" | grep "Avg CPU:" | awk '{print $3}' | tr -d '%')
 
 echo ""
 echo "--- Block Preparation Metrics ---"
 echo "Filtering by timestamp range: $TX_START_TIMESTAMP to $TX_END_TIMESTAMP"
 
 # Extract block metrics using timestamp filtering
-awk -v start_ts="$TX_START_TIMESTAMP" -v end_ts="$TX_END_TIMESTAMP" '
+BLOCK_ANALYSIS=$(awk -v start_ts="$TX_START_TIMESTAMP" -v end_ts="$TX_END_TIMESTAMP" '
 {
     # Extract timestamp from log line (format: YYYY-MM-DD HH:MM:SS)
     if (match($0, /^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}/)) {
@@ -116,7 +124,7 @@ awk -v start_ts="$TX_START_TIMESTAMP" -v end_ts="$TX_END_TIMESTAMP" '
     }
 }' $COLLATOR_LOG | \
 grep "Prepared block for propo" | \
-sed -E 's/.*at ([0-9]+).*\(([0-9]+) ms\).*extrinsics \(([0-9]+)\).*/\1 \2 \3/' | \
+sed -E 's/.*at ([0-9]+) \(([0-9]+) ms\).*extrinsics_count: ([0-9]+).*/\1 \2 \3/' | \
 awk '{
     sum_duration += $2
     sum_extrinsics += $3
@@ -138,7 +146,14 @@ END {
     } else {
         print "No block preparation data found"
     }
-}'
+}')
+
+echo "$BLOCK_ANALYSIS"
+
+# Extract block proposal values for CSV (remove "ms" suffix)
+PROPOSAL_MIN=$(echo "$BLOCK_ANALYSIS" | grep "Min duration:" | awk '{print $3}')
+PROPOSAL_MAX=$(echo "$BLOCK_ANALYSIS" | grep "Max duration:" | awk '{print $3}')
+PROPOSAL_AVG=$(echo "$BLOCK_ANALYSIS" | grep "Avg duration:" | awk '{print $3}')
 
 echo ""
 echo "========================================"
@@ -149,3 +164,10 @@ echo "  Summary: $SUMMARY_OUTPUT"
 echo "  Timestamps: $TIMESTAMP_FILE"
 echo "========================================"
 } | tee "$SUMMARY_OUTPUT"
+
+# Append results to global CSV file if specified
+if [ -n "$RESULTS_FILE" ]; then
+    # Format: interest_cache,log_level,proposal_min_ms,proposal_max_ms,proposal_avg_ms,cpu_min_pct,cpu_max_pct,cpu_avg_pct
+    echo "$INTEREST_CACHE,$LOG_LEVEL,$PROPOSAL_MIN,$PROPOSAL_MAX,$PROPOSAL_AVG,$CPU_MIN,$CPU_MAX,$CPU_AVG" >> "$RESULTS_FILE"
+    echo "Results appended to: $RESULTS_FILE"
+fi
