@@ -32,7 +32,8 @@ echo "TX_START: $TX_START_TIMESTAMP (epoch: $TX_START_TIME)"
 
 RUST_LOG=info,zombienet_orchestrator=debug \
 ZOMBIE_PROVIDER=native \
-cargo nextest run --release -p polkadot-zombienet-sdk-tests --features zombie-metadata,zombie-ci --no-capture txs_per_block_test_2
+cargo test --release -p polkadot-zombienet-sdk-tests --features zombie-metadata,zombie-ci txs_per_block_test_2 -- --no-capture
+# cargo nextest run --release -p polkadot-zombienet-sdk-tests --features zombie-metadata,zombie-ci --no-capture txs_per_block_test_2
 
 TX_END_TIME=$(date +%s)
 TX_END_TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
@@ -60,21 +61,8 @@ SUMMARY_OUTPUT="${OUTPUT_DIR}/summary_${OUTPUT}.log"
 # Load timestamps
 source "$TIMESTAMP_FILE"
 
-# process COLLATOR_LOG and TOP_OUTPUT
-{
-echo ""
-echo "========================================"
-echo "  Performance Analysis Results"
-echo "  Time Range: $TX_START_TIMESTAMP to $TX_END_TIMESTAMP"
-echo "========================================"
-echo ""
-
+# Run analysis and capture results BEFORE the tee block to preserve variables
 # Process CPU metrics from TOP_OUTPUT
-echo "--- CPU Usage Analysis ---"
-echo "Filtering by timestamp range: $TX_START_TIMESTAMP to $TX_END_TIMESTAMP"
-
-# TOP output format: YYYY-MM-DD HH:MM:SS PID CPU MEM
-# After timestamp filtering, CPU is in column 4
 CPU_ANALYSIS=$(awk -v start_ts="$TX_START_TIMESTAMP" -v end_ts="$TX_END_TIMESTAMP" '
 {
     # Extract timestamp from first two columns (YYYY-MM-DD HH:MM:SS)
@@ -102,16 +90,10 @@ END {
     }
 }' $TOP_OUTPUT)
 
-echo "$CPU_ANALYSIS"
-
 # Extract CPU values for CSV (remove % sign)
 CPU_MIN=$(echo "$CPU_ANALYSIS" | grep "Min CPU:" | awk '{print $3}' | tr -d '%')
 CPU_MAX=$(echo "$CPU_ANALYSIS" | grep "Max CPU:" | awk '{print $3}' | tr -d '%')
 CPU_AVG=$(echo "$CPU_ANALYSIS" | grep "Avg CPU:" | awk '{print $3}' | tr -d '%')
-
-echo ""
-echo "--- Block Preparation Metrics ---"
-echo "Filtering by timestamp range: $TX_START_TIMESTAMP to $TX_END_TIMESTAMP"
 
 # Extract block metrics using timestamp filtering
 BLOCK_ANALYSIS=$(awk -v start_ts="$TX_START_TIMESTAMP" -v end_ts="$TX_END_TIMESTAMP" '
@@ -149,12 +131,28 @@ END {
     }
 }')
 
-echo "$BLOCK_ANALYSIS"
-
-# Extract block proposal values for CSV (remove "ms" suffix)
+# Extract block proposal values for CSV
 PROPOSAL_MIN=$(echo "$BLOCK_ANALYSIS" | grep "Min duration:" | awk '{print $3}')
 PROPOSAL_MAX=$(echo "$BLOCK_ANALYSIS" | grep "Max duration:" | awk '{print $3}')
 PROPOSAL_AVG=$(echo "$BLOCK_ANALYSIS" | grep "Avg duration:" | awk '{print $3}')
+
+# Now output everything with tee (all variables are already extracted)
+{
+echo ""
+echo "========================================"
+echo "  Performance Analysis Results"
+echo "  Time Range: $TX_START_TIMESTAMP to $TX_END_TIMESTAMP"
+echo "========================================"
+echo ""
+
+echo "--- CPU Usage Analysis ---"
+echo "Filtering by timestamp range: $TX_START_TIMESTAMP to $TX_END_TIMESTAMP"
+echo "$CPU_ANALYSIS"
+
+echo ""
+echo "--- Block Preparation Metrics ---"
+echo "Filtering by timestamp range: $TX_START_TIMESTAMP to $TX_END_TIMESTAMP"
+echo "$BLOCK_ANALYSIS"
 
 echo ""
 echo "========================================"
@@ -169,6 +167,7 @@ echo "========================================"
 # Append results to global CSV file if specified
 if [ -n "$RESULTS_FILE" ]; then
     # Format: interest_cache,log_level,proposal_min_ms,proposal_max_ms,proposal_avg_ms,cpu_min_pct,cpu_max_pct,cpu_avg_pct
+    echo "$INTEREST_CACHE,$LOG_LEVEL,$PROPOSAL_MIN,$PROPOSAL_MAX,$PROPOSAL_AVG,$CPU_MIN,$CPU_MAX,$CPU_AVG"
     echo "$INTEREST_CACHE,$LOG_LEVEL,$PROPOSAL_MIN,$PROPOSAL_MAX,$PROPOSAL_AVG,$CPU_MIN,$CPU_MAX,$CPU_AVG" >> "$RESULTS_FILE"
     echo "Results appended to: $RESULTS_FILE"
 fi
