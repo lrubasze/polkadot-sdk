@@ -31,11 +31,142 @@ use zombienet_sdk::{
 const KEYS_COUNT: usize = 100;
 const CHUNK_SIZE: usize = 100;
 const TXS_PER_BLOCK: usize = 1000; // Target number of transactions per block
-const NUM_BLOCKS: u32 = 10; // Number of blocks to test
+const NUM_BLOCKS: u32 = 20; // Number of blocks to test
 const TRANSFER_AMOUNT: u128 = 1000000; // Small amount for transfers
 
 #[tokio::test(flavor = "multi_thread")]
-async fn txs_per_block_test() -> Result<(), anyhow::Error> {
+async fn txs_per_block_test_2() -> Result<(), anyhow::Error> {
+	let _ = env_logger::try_init_from_env(
+		env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
+	);
+
+	let para_client: OnlineClient<PolkadotConfig> = OnlineClient::from_insecure_url("ws://127.0.0.1:62636").await.unwrap();
+
+	log::info!("Assuming network is ready");
+
+	log::info!("Warm-up finished, starting test setup");
+	let alice = dev::alice();
+	let keys = create_keys(KEYS_COUNT);
+
+	// Initialize nonce tracker for all keys
+	let nonce_tracker = Arc::new(DashMap::new());
+	for (i, key) in keys.iter().enumerate() {
+		let account_id = key.public_key().to_account_id();
+		let nonce = para_client.tx().account_nonce(&account_id).await?;
+		nonce_tracker.insert(i, AtomicU64::new(nonce));
+	}
+
+	// Wrap keys in Arc for sharing
+	let keys = Arc::new(keys);
+
+	log::info!(
+		"Starting per-block test: {} transactions per block for {} blocks",
+		TXS_PER_BLOCK,
+		NUM_BLOCKS
+	);
+	let start_time = Instant::now();
+
+	// Subscribe to finalized blocks to know when to submit next batch
+	let mut blocks_sub = para_client.blocks().subscribe_finalized().await?;
+
+	let mut total_txs_submitted = 0u64;
+	let mut blocks_processed = 0u32;
+
+	// Wait for first block
+	let _initial_block = blocks_sub.next().await.transpose()?.expect("Block stream ended");
+
+	while blocks_processed < NUM_BLOCKS {
+		log::info!("Preparing batch {} for next block", blocks_processed + 1);
+
+		// Create batch of transactions for this block
+		let mut batch_txs = Vec::with_capacity(TXS_PER_BLOCK);
+
+		for i in 0..TXS_PER_BLOCK {
+			let sender_idx = i % KEYS_COUNT;
+			let sender_key = &keys[sender_idx];
+
+			// Get next recipient (round-robin)
+			let recipient_idx = (sender_idx + 1) % KEYS_COUNT;
+			let recipient_key = &keys[recipient_idx];
+			let recipient_account = recipient_key.public_key().into();
+
+			// Get and increment nonce
+			let sender_nonce = if let Some(nonce_ref) = nonce_tracker.get(&sender_idx) {
+				nonce_ref.fetch_add(1, Ordering::SeqCst)
+			} else {
+				0
+			};
+
+			// Create transfer transaction
+			let call = ahw::tx().balances().transfer_keep_alive(recipient_account, TRANSFER_AMOUNT);
+			let params = tx_params(sender_nonce);
+
+			match para_client.tx().create_signed(&call, sender_key, params).await {
+				Ok(tx) => batch_txs.push(tx),
+				Err(e) => {
+					log::warn!("Failed to create transaction: {:?}", e);
+					continue;
+				},
+			}
+		}
+
+		let batch_size = batch_txs.len();
+		log::info!("Submitting batch of {} transactions", batch_size);
+
+		// Submit all transactions at once
+		match submit_txs_fire_and_forget(batch_txs).await {
+			Ok(count) => {
+				total_txs_submitted += count;
+				log::info!("Successfully submitted {} transactions", count);
+			},
+			Err(e) => {
+				log::warn!("Failed to submit batch: {:?}", e);
+			},
+		}
+
+		// Wait for next finalized block
+		match blocks_sub.next().await {
+			Some(Ok(block)) => {
+				blocks_processed += 1;
+				log::info!(
+					"Block {} finalized: {:?}, total txs submitted so far: {}",
+					blocks_processed,
+					block.hash(),
+					total_txs_submitted
+				);
+			},
+			Some(Err(e)) => {
+				log::error!("Error receiving block: {:?}", e);
+				break;
+			},
+			None => {
+				log::error!("Block stream ended unexpectedly");
+				break;
+			},
+		}
+	}
+
+	let elapsed = start_time.elapsed();
+	let avg_txs_per_block = if blocks_processed > 0 {
+		total_txs_submitted as f64 / blocks_processed as f64
+	} else {
+		0.0
+	};
+	let tps = total_txs_submitted as f64 / elapsed.as_secs_f64();
+
+	log::info!("=== Per-Block Test Results ===");
+	log::info!("Duration: {:.2} seconds", elapsed.as_secs_f64());
+	log::info!("Blocks processed: {}", blocks_processed);
+	log::info!("Total transactions submitted: {}", total_txs_submitted);
+	log::info!("Average transactions per block: {:.2}", avg_txs_per_block);
+	log::info!("Average throughput: {:.2} TPS", tps);
+	log::info!("Target transactions per block: {}", TXS_PER_BLOCK);
+	log::info!("================================");
+
+	Ok(())
+}
+#[tokio::test(flavor = "multi_thread")]
+async fn txs_per_block_test_1() -> Result<(), anyhow::Error> {
 	let _ = env_logger::try_init_from_env(
 		env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
 	);
@@ -233,8 +364,8 @@ async fn setup_network() -> Result<Network<LocalFileSystem>, anyhow::Error> {
 }
 
 fn create_keys(n: usize) -> Vec<Keypair> {
-	let mut rng = rand::thread_rng();
-	let seed: u32 = rng.gen();
+	// let mut rng = rand::thread_rng();
+	let seed: u32 = 1;//rng.gen();
 	(0..n)
 		.map(|i| {
 			let uri = SecretUri::from_str(&format!("//key{}_perblock{}", seed, i)).unwrap();
