@@ -167,7 +167,6 @@ echo "========================================"
 # Append results to global CSV file if specified
 if [ -n "$RESULTS_FILE" ]; then
     # Format: interest_cache,log_level,proposal_min_ms,proposal_max_ms,proposal_avg_ms,cpu_min_pct,cpu_max_pct,cpu_avg_pct
-    echo "$INTEREST_CACHE,$LOG_LEVEL,$PROPOSAL_MIN,$PROPOSAL_MAX,$PROPOSAL_AVG,$CPU_MIN,$CPU_MAX,$CPU_AVG"
-    echo "$INTEREST_CACHE,$LOG_LEVEL,$PROPOSAL_MIN,$PROPOSAL_MAX,$PROPOSAL_AVG,$CPU_MIN,$CPU_MAX,$CPU_AVG" >> "$RESULTS_FILE"
+    echo "$INTEREST_CACHE;$LOG_LEVEL;$PROPOSAL_MIN;$PROPOSAL_MAX;$PROPOSAL_AVG;$CPU_MIN;$CPU_MAX;$CPU_AVG" >> "$RESULTS_FILE"
     echo "Results appended to: $RESULTS_FILE"
 fi

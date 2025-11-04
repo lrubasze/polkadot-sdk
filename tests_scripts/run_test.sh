@@ -13,35 +13,35 @@ set -e
 INTEREST_CACHE_CONFIGS=(
     "disabled"   # explicitly disabled
     "default"    # enabled with defaults
-    # "min_verbosity=info,lru_cache_size=1024"
-    # "min_verbosity=trace,lru_cache_size=1024"
+    "min_verbosity=info,lru_cache_size=1024"
+    "min_verbosity=trace,lru_cache_size=1024"
 )
 
 CACHE_TYPE_NAMES=(
     "disabled"
     "default"
-    # "min_info"
-    # "min_trace"
+    "min_info"
+    "min_trace"
 )
 
 COLLATOR_LOGS=(
     "-linfo"
     "-linfo,parachain=debug,aura=debug"
-    # "-linfo,parachain=debug,aura=debug,alexggh=debug"
-    # "-linfo,parachain=debug,aura=debug,alexggh=trace"
-    # "-linfo,alexggh=debug"
-    # "-linfo,alexggh=trace"
-    # "-linfo,alexggh=debug,abcdefg=trace"
+    "-linfo,parachain=debug,aura=debug,alexggh=debug"
+    "-linfo,parachain=debug,aura=debug,alexggh=trace"
+    "-linfo,alexggh=debug"
+    "-linfo,alexggh=trace"
+    "-linfo,alexggh=debug,abcdefg=trace"
 )
 
 LOG_NAMES=(
     "info"
     "info_para_debug"
-    # "info_para_debug_al_debug"
-    # "info_para_debug_al_trace"
-    # "info_al_debug"
-    # "info_al_trace"
-    # "info_al_debug_abc_trace"
+    "info_para_debug_al_debug"
+    "info_para_debug_al_trace"
+    "info_al_debug"
+    "info_al_trace"
+    "info_al_debug_abc_trace"
 )
 
 # Generate timestamp for this run
