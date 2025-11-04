@@ -2,6 +2,10 @@
 
 set -e
 
+INTEREST_CACHE=${1:-disabled}
+LOG_LEVEL=${2:-info,alexgg=debug,parachain=debug}
+OUTPUT=${3:-output}
+
 TEST_DIR=test1
 TSTAMP=$(date +%Y%m%d_%H%M%S)
 
@@ -10,10 +14,9 @@ TSTAMP=$(date +%Y%m%d_%H%M%S)
 
 sleep 2
 COLLATOR_LOG=${TEST_DIR}/collator.log
-
-TOP_OUTPUT="top_${TSTAMP}_ic_default_ll_info_al_debug.log"
+TOP_OUTPUT="top_${OUTPUT}.log"
 # launch collator
-INTEREST_CACHE=disabled ./node_launch.sh $TEST_DIR collator "info,alexgg=debug,parachain=debug" $TOP_OUTPUT
+INTEREST_CACHE=$INTEREST_CACHE ./node_launch.sh $TEST_DIR collator $LOG_LEVEL $TOP_OUTPUT
 
 # give some time for collator to sync
 sleep 60
@@ -22,7 +25,7 @@ sleep 60
 RUST_LOG=info,zombienet_orchestrator=debug
 ZOMBIE_PROVIDER=native
 
-echo "tx_start" >> $TOP_OUTPUT
+echo "tx_start" > $TOP_OUTPUT
 echo "tx_start" >> $COLLATOR_LOG
 cargo nextest run --release -p polkadot-zombienet-sdk-tests --features zombie-metadata,zombie-ci --no-capture txs_per_block_test_2
 echo "tx_done" >> $TOP_OUTPUT
@@ -30,8 +33,15 @@ echo "tx_done" >> $COLLATOR_LOG
 
 pkill -9 polkadot polkadot-parachain top
 
+COLLATOR_LOG="collator_${OUTPUT}.log"
+
+cp $TEST_DIR/collator.log  $COLLATOR_LOG
+
+# Create summary output file
+SUMMARY_OUTPUT="summary_${OUTPUT}.log"
 
 # process COLLATOR_LOG and TOP_OUTPUT
+{
 echo ""
 echo "========================================"
 echo "  Performance Analysis Results"
@@ -95,4 +105,6 @@ echo "========================================"
 echo "Full logs available:"
 echo "  TOP: $TOP_OUTPUT"
 echo "  Collator: $COLLATOR_LOG"
+echo "  Summary: $SUMMARY_OUTPUT"
 echo "========================================"
+} | tee "$SUMMARY_OUTPUT"

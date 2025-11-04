@@ -6,8 +6,9 @@ set -u
 #/var/folders/sc/c9stf8y96798j41wbx8hp42w0000gn/T/zombie-f11bbe75-90f6-481c-aaaa-0a6b46666997
 BASE_DIR=$1
 WHAT=$2
-LOG_LEVEL=${3-info}
-MONITOR_OUTPUT=${4-none}
+LOG_LEVEL=${3:-info}
+MONITOR_OUTPUT=${4:-none}
+
 collator_metrics=
 PATH=/Users/lukasz/work/paritytech/polkadot-sdk/bin:$PATH
 
