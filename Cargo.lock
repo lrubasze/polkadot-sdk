@@ -17471,11 +17471,14 @@ name = "polkadot-zombienet-sdk-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "asset-hub-westend-runtime",
  "cumulus-zombienet-sdk-helpers",
  "dashmap 6.1.0",
  "env_logger 0.11.3",
+ "ethabi-decode",
  "futures",
  "log",
+ "pallet-revive",
  "parity-scale-codec",
  "polkadot-primitives",
  "rand 0.8.5",
