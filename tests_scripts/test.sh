@@ -64,98 +64,26 @@ SUMMARY_OUTPUT="${OUTPUT_DIR}/summary_${OUTPUT}.log"
 # Load timestamps
 source "$TIMESTAMP_FILE"
 
-# Run analysis and capture results BEFORE the tee block to preserve variables
-# Process CPU metrics from TOP_OUTPUT
-CPU_ANALYSIS=$(awk -v start_ts="$TX_START_TIMESTAMP" -v end_ts="$TX_END_TIMESTAMP" '
-{
-    # Extract timestamp from first two columns (YYYY-MM-DD HH:MM:SS)
-    if (NF >= 5 && match($1, /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)) {
-        log_ts = $1 " " $2
-        if (log_ts >= start_ts && log_ts <= end_ts) {
-            cpu = $4
-            if (cpu ~ /^[0-9]+\.?[0-9]*$/) {
-                sum += cpu
-                count++
-                if (cpu > max || max == "") max = cpu
-                if (cpu < min || min == "") min = cpu
-            }
-        }
-    }
-}
-END {
-    if (count > 0) {
-        printf "Samples: %d\n", count
-        printf "Avg CPU: %.2f%%\n", sum/count
-        printf "Min CPU: %.2f%%\n", min
-        printf "Max CPU: %.2f%%\n", max
-    } else {
-        print "No CPU data found in time range"
-    }
-}' $TOP_OUTPUT)
+# Use Python script for metric analysis (replaces complex AWK logic)
+# This script parses logs, calculates metrics, and outputs both summary and CSV data
+echo "Running metric analysis..."
 
-# Extract CPU values for CSV (remove % sign)
-CPU_MIN=$(echo "$CPU_ANALYSIS" | grep "Min CPU:" | awk '{print $3}' | tr -d '%')
-CPU_MAX=$(echo "$CPU_ANALYSIS" | grep "Max CPU:" | awk '{print $3}' | tr -d '%')
-CPU_AVG=$(echo "$CPU_ANALYSIS" | grep "Avg CPU:" | awk '{print $3}' | tr -d '%')
+# Get the directory where test.sh is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Extract block metrics using timestamp filtering
-BLOCK_ANALYSIS=$(awk -v start_ts="$TX_START_TIMESTAMP" -v end_ts="$TX_END_TIMESTAMP" '
-{
-    # Extract timestamp from log line (format: YYYY-MM-DD HH:MM:SS)
-    if (match($0, /^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}/)) {
-        log_ts = substr($0, RSTART, RLENGTH)
-        if (log_ts >= start_ts && log_ts <= end_ts) {
-            print $0
-        }
-    }
-}' $COLLATOR_LOG | \
-grep "Prepared block for propo" | \
-sed -E 's/.*at ([0-9]+) \(([0-9]+) ms\).*extrinsics_count: ([0-9]+).*/\1 \2 \3/' | \
-awk '{
-    sum_duration += $2
-    sum_extrinsics += $3
-    min_duration = (min_duration == "" || $2 < min_duration) ? $2 : min_duration
-    max_duration = (max_duration == "" || $2 > max_duration) ? $2 : max_duration
-    count++
-    blocks[count] = $1 "," $2 "," $3
-}
-END {
-    if (count > 0) {
-        print "Block,Duration(ms),Extrinsics"
-        for (i=1; i<=count; i++) print blocks[i]
-        print ""
-        printf "Total blocks: %d\n", count
-        printf "Avg duration: %.2f ms\n", sum_duration/count
-        printf "Min duration: %d ms\n", min_duration
-        printf "Max duration: %d ms\n", max_duration
-        printf "Avg extrinsics: %.2f\n", sum_extrinsics/count
-    } else {
-        print "No block preparation data found"
-    }
-}')
+# Run Python analysis - it will output summary and optionally append to CSV
+CSV_ARGS=""
+if [ -n "$RESULTS_FILE" ]; then
+    CSV_ARGS="--csv-file $RESULTS_FILE --interest-cache $INTEREST_CACHE --log-level $LOG_LEVEL"
+fi
 
-# Extract block proposal values for CSV
-PROPOSAL_MIN=$(echo "$BLOCK_ANALYSIS" | grep "Min duration:" | awk '{print $3}')
-PROPOSAL_MAX=$(echo "$BLOCK_ANALYSIS" | grep "Max duration:" | awk '{print $3}')
-PROPOSAL_AVG=$(echo "$BLOCK_ANALYSIS" | grep "Avg duration:" | awk '{print $3}')
-
-# Now output everything with tee (all variables are already extracted)
-{
-echo ""
-echo "========================================"
-echo "  Performance Analysis Results"
-echo "  Time Range: $TX_START_TIMESTAMP to $TX_END_TIMESTAMP"
-echo "========================================"
-echo ""
-
-echo "--- CPU Usage Analysis ---"
-echo "Filtering by timestamp range: $TX_START_TIMESTAMP to $TX_END_TIMESTAMP"
-echo "$CPU_ANALYSIS"
-
-echo ""
-echo "--- Block Preparation Metrics ---"
-echo "Filtering by timestamp range: $TX_START_TIMESTAMP to $TX_END_TIMESTAMP"
-echo "$BLOCK_ANALYSIS"
+python3 "${SCRIPT_DIR}/analyze_metrics.py" \
+    --collator-log "$COLLATOR_LOG" \
+    --top-log "$TOP_OUTPUT" \
+    --start-time "$TX_START_TIMESTAMP" \
+    --end-time "$TX_END_TIMESTAMP" \
+    --output "$SUMMARY_OUTPUT" \
+    $CSV_ARGS
 
 echo ""
 echo "========================================"
@@ -164,12 +92,7 @@ echo "  TOP: $TOP_OUTPUT"
 echo "  Collator: $COLLATOR_LOG"
 echo "  Summary: $SUMMARY_OUTPUT"
 echo "  Timestamps: $TIMESTAMP_FILE"
-echo "========================================"
-} | tee "$SUMMARY_OUTPUT"
-
-# Append results to global CSV file if specified
 if [ -n "$RESULTS_FILE" ]; then
-    # Format: interest_cache,log_level,proposal_min_ms,proposal_max_ms,proposal_avg_ms,cpu_min_pct,cpu_max_pct,cpu_avg_pct
-    echo "$INTEREST_CACHE;$LOG_LEVEL;$PROPOSAL_MIN;$PROPOSAL_MAX;$PROPOSAL_AVG;$CPU_MIN;$CPU_MAX;$CPU_AVG" >> "$RESULTS_FILE"
-    echo "Results appended to: $RESULTS_FILE"
+    echo "  Results CSV: $RESULTS_FILE"
 fi
+echo "========================================"
