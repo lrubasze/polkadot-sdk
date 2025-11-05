@@ -13,35 +13,35 @@ set -e
 INTEREST_CACHE_CONFIGS=(
     "disabled"   # explicitly disabled
     "default"    # enabled with defaults
-    "min_verbosity=info,lru_cache_size=1024"
-    "min_verbosity=trace,lru_cache_size=1024"
+    # "min_verbosity=info,lru_cache_size=1024"
+    # "min_verbosity=trace,lru_cache_size=1024"
 )
 
 CACHE_TYPE_NAMES=(
     "disabled"
     "default"
-    "min_info"
-    "min_trace"
+    # "min_info"
+    # "min_trace"
 )
 
 COLLATOR_LOGS=(
     "-linfo"
     "-linfo,parachain=debug,aura=debug"
-    "-linfo,parachain=debug,aura=debug,alexggh=debug"
-    "-linfo,parachain=debug,aura=debug,alexggh=trace"
+    # "-linfo,parachain=debug,aura=debug,alexggh=debug"
+    # "-linfo,parachain=debug,aura=debug,alexggh=trace"
     "-linfo,alexggh=debug"
     "-linfo,alexggh=trace"
-    "-linfo,alexggh=debug,abcdefg=trace"
+    # "-linfo,alexggh=debug,abcdefg=trace"
 )
 
 LOG_NAMES=(
     "info"
     "info_para_debug"
-    "info_para_debug_al_debug"
-    "info_para_debug_al_trace"
+    # "info_para_debug_al_debug"
+    # "info_para_debug_al_trace"
     "info_al_debug"
     "info_al_trace"
-    "info_al_debug_abc_trace"
+    # "info_al_debug_abc_trace"
 )
 
 # Generate timestamp for this run
@@ -54,7 +54,7 @@ echo "Created output directory: $OUTPUT_DIR"
 
 # Create global results CSV file (in current directory, not in OUTPUT_DIR)
 RESULTS_FILE="results_${TIMESTAMP}.csv"
-echo "interest_cache;log_level;proposal_min_ms;proposal_max_ms;proposal_avg_ms;cpu_min_pct;cpu_max_pct;cpu_avg_pct" > "$RESULTS_FILE"
+echo "interest_cache;log_level;blocks_analyzed;proposal_min_ms;proposal_max_ms;proposal_avg_ms;avg_extrinsics;cpu_min_pct;cpu_max_pct;cpu_avg_pct" > "$RESULTS_FILE"
 echo "Created global results file: $RESULTS_FILE"
 
 # Function to run test with given configuration
