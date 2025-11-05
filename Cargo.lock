@@ -17482,6 +17482,7 @@ dependencies = [
  "parity-scale-codec",
  "polkadot-primitives",
  "rand 0.8.5",
+ "reqwest",
  "sc-executor 0.32.0",
  "sc-runtime-utilities",
  "serde",

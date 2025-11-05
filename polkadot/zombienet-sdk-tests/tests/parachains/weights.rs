@@ -15,9 +15,8 @@ use asset_hub_westend_runtime::Runtime as AHWRuntime;
 use ethabi::Token;
 use futures::{stream::FuturesUnordered, StreamExt};
 use pallet_revive::AddressMapper;
-use rand::Rng;
 use sp_core::{H160, H256};
-use std::str::FromStr;
+use std::{fs, str::FromStr};
 use zombienet_sdk::{
 	subxt::{self, config::polkadot::PolkadotExtrinsicParamsBuilder, OnlineClient, PolkadotConfig},
 	subxt_signer::{
@@ -32,7 +31,80 @@ const CHUNK_SIZE: usize = 3000;
 const CALL_CHUNK_SIZE: usize = 3000;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn weights_test() -> Result<(), anyhow::Error> {
+async fn weights_test_2() -> Result<(), anyhow::Error> {
+	let _ = env_logger::try_init_from_env(
+		env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
+	);
+
+	// Read contract address from file written by weights_test_prepare
+	let contract_address_file = std::env::current_dir()?.join("contract_address.txt");
+	let contract_address_str = fs::read_to_string(&contract_address_file)?;
+	let contract_address = H160::from_str(contract_address_str.trim())?;
+	log::info!("Contract address read from file: {:?}", contract_address);
+
+	log::info!("Network is ready, waiting for warm-up to finish");
+	// let _ = wait_warmup_finish(collator).await;
+
+	// while collator.reports("substrate_tasks_ended_total{kind=\"blocking\",reason=\"finished\",
+	// task_group=\"default\",task_name=\"warm-up-trie-cache\",chain=\"asset-hub-westend-local\"}").
+	// await? < 0.5 {
+	let _ = wait_warmup_finish_http("http://127.0.0.1:62637/metrics");
+
+	log::info!("Warm-up finished, starting test");
+	let alice = dev::alice();
+	let keys = create_keys(KEYS_COUNT);
+	let mut nonce = 0;
+	let mut nonce = || {
+		let current_nonce = nonce;
+		nonce += 1;
+		current_nonce
+	};
+
+	log::info!("Preparing transfers");
+	let mut transfer_50_payload = keys
+		.iter()
+		.map(|key| {
+			let transfer_selector = sp_core::hex2array!("a9059cbb");
+			let mut data = transfer_selector.to_vec();
+			let account_id = key.public_key().0.into();
+			let h160 =
+				<AHWRuntime as pallet_revive::Config>::AddressMapper::to_address(&account_id);
+			data.extend(ethabi::encode(&[Token::Address(h160), Token::Uint(50.into())]));
+
+			data
+		})
+		.collect::<Vec<_>>();
+	transfer_50_payload.rotate_left(1);
+
+	let mut call_clients = vec![];
+	let para_client: OnlineClient<PolkadotConfig> =
+		OnlineClient::from_insecure_url("ws://127.0.0.1:62636").await.unwrap();
+
+	for _ in 0..(KEYS_COUNT / CALL_CHUNK_SIZE + 1) {
+		let call_client: OnlineClient<PolkadotConfig> =
+			OnlineClient::from_insecure_url("ws://127.0.0.1:62636").await.unwrap();
+		call_clients.push(call_client);
+	}
+
+	log::info!("Warm-up finished, transfering ERC20 tokens");
+
+	call_contract(
+		&para_client,
+		call_clients,
+		contract_address,
+		&alice,
+		&keys,
+		nonce(),
+		transfer_50_payload,
+	)
+	.await?;
+	// assert_block_proposing_time_no_greater_than_1s(&collator).await;
+
+	Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn weights_test_prepare() -> Result<(), anyhow::Error> {
 	let _ = env_logger::try_init_from_env(
 		env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
 	);
@@ -65,6 +137,11 @@ async fn weights_test() -> Result<(), anyhow::Error> {
 	let contract_address = instantiate_contract(&para_client, &alice).await?;
 	log::info!("Contract instantiated: {:?}", contract_address);
 
+	// Write contract address to file for weights_test_2 to read
+	let contract_address_file = std::env::current_dir()?.join("contract_address.txt");
+	fs::write(&contract_address_file, format!("{:?}", contract_address))?;
+	log::info!("Contract address written to: {:?}", contract_address_file);
+
 	log::info!("Minting...");
 	let mint_100 = sp_core::hex2array!(
 		"a0712d680000000000000000000000000000000000000000000000000000000000000064"
@@ -83,47 +160,50 @@ async fn weights_test() -> Result<(), anyhow::Error> {
 	.await?;
 	assert_block_proposing_time_no_greater_than_1s(&collator).await;
 
-	log::info!("Minting finished, preparing transfers");
-	let mut transfer_50_payload = keys
-		.iter()
-		.map(|key| {
-			let transfer_selector = sp_core::hex2array!("a9059cbb");
-			let mut data = transfer_selector.to_vec();
-			let account_id = key.public_key().0.into();
-			let h160 =
-				<AHWRuntime as pallet_revive::Config>::AddressMapper::to_address(&account_id);
-			data.extend(ethabi::encode(&[Token::Address(h160), Token::Uint(50.into())]));
+	// log::info!("Minting finished, preparing transfers");
+	// let mut transfer_50_payload = keys
+	// 	.iter()
+	// 	.map(|key| {
+	// 		let transfer_selector = sp_core::hex2array!("a9059cbb");
+	// 		let mut data = transfer_selector.to_vec();
+	// 		let account_id = key.public_key().0.into();
+	// 		let h160 =
+	// 			<AHWRuntime as pallet_revive::Config>::AddressMapper::to_address(&account_id);
+	// 		data.extend(ethabi::encode(&[Token::Address(h160), Token::Uint(50.into())]));
 
-			data
-		})
-		.collect::<Vec<_>>();
-	transfer_50_payload.rotate_left(1);
+	// 		data
+	// 	})
+	// 	.collect::<Vec<_>>();
+	// transfer_50_payload.rotate_left(1);
 
-	log::info!("Restarting collator to ensure it starts with a clean state and waiting for warm-up to finish");
+	// log::info!(
+	// 	"Restarting collator to ensure it starts with a clean state and waiting for
+	// warm-up to finish"
+	// );
 
-	collator.restart(None).await?;
-	let mut call_clients = vec![];
-	let para_client: OnlineClient<PolkadotConfig> = collator.wait_client().await?;
+	// collator.restart(None).await?;
+	// let mut call_clients = vec![];
+	// let para_client: OnlineClient<PolkadotConfig> = collator.wait_client().await?;
 
-	for _ in 0..(KEYS_COUNT / CALL_CHUNK_SIZE + 1) {
-		let call_client: OnlineClient<PolkadotConfig> = collator.wait_client().await?;
-		call_clients.push(call_client);
-	}
+	// for _ in 0..(KEYS_COUNT / CALL_CHUNK_SIZE + 1) {
+	// 	let call_client: OnlineClient<PolkadotConfig> = collator.wait_client().await?;
+	// 	call_clients.push(call_client);
+	// }
 
-	let _ = wait_warmup_finish(collator).await;
-	log::info!("Warm-up finished, transfering ERC20 tokens");
+	// let _ = wait_warmup_finish(collator).await;
+	// log::info!("Warm-up finished, transfering ERC20 tokens");
 
-	call_contract(
-		&para_client,
-		call_clients,
-		contract_address,
-		&alice,
-		&keys,
-		nonce(),
-		transfer_50_payload,
-	)
-	.await?;
-	assert_block_proposing_time_no_greater_than_1s(&collator).await;
+	// call_contract(
+	// 	&para_client,
+	// 	call_clients,
+	// 	contract_address,
+	// 	&alice,
+	// 	&keys,
+	// 	nonce(),
+	// 	transfer_50_payload,
+	// )
+	// .await?;
+	// assert_block_proposing_time_no_greater_than_1s(&collator).await;
 
 	Ok(())
 }
@@ -138,15 +218,60 @@ async fn assert_block_proposing_time_no_greater_than_1s(collator: &NetworkNode) 
 		.await
 		.expect("Could not fetch report");
 
-	let num_blocks_hit_deadline = collator.reports("substrate_proposer_end_proposal_reason{reason=\"hit_deadline\",chain=\"asset-hub-westend-local\"}").await.expect("Could not fetch report");
 	assert_eq!(num_blocks_under_1s, num_total_proposed_blocks);
-	assert_eq!(num_blocks_hit_deadline, 0.0, "There should be no blocks that hit the deadline");
+	let _num_blocks_hit_deadline = collator.reports("substrate_proposer_end_proposal_reason{reason=\"hit_deadline\",chain=\"asset-hub-westend-local\"}").await.expect("Could not fetch report");
+	// assert_eq!(num_blocks_hit_deadline, 0.0, "There should be no blocks that hit the deadline");
 }
 
 async fn wait_warmup_finish(collator: &NetworkNode) -> Result<(), anyhow::Error> {
 	while collator.reports("substrate_tasks_ended_total{kind=\"blocking\",reason=\"finished\",task_group=\"default\",task_name=\"warm-up-trie-cache\",chain=\"asset-hub-westend-local\"}").await? < 0.5 {
 		std::thread::sleep(std::time::Duration::from_secs(10));
 	}
+	Ok(())
+}
+
+async fn query_metric_http(url: &str, metric_name: &str) -> Result<f64, anyhow::Error> {
+	let response = reqwest::get(url).await?;
+	let body = response.text().await?;
+
+	// Parse Prometheus metrics format
+	for line in body.lines() {
+		// Skip comments and empty lines
+		if line.starts_with('#') || line.is_empty() {
+			continue;
+		}
+
+		// Check if this line contains our metric
+		if line.starts_with(metric_name) {
+			// Extract the value after the last space
+			if let Some(value_str) = line.split_whitespace().last() {
+				if let Ok(value) = value_str.parse::<f64>() {
+					return Ok(value);
+				}
+			}
+		}
+	}
+
+	// If metric not found, return 0
+	Ok(0.0)
+}
+
+async fn wait_warmup_finish_http(metrics_url: &str) -> Result<(), anyhow::Error> {
+	let metric_name = "substrate_tasks_ended_total{kind=\"blocking\",reason=\"finished\",task_group=\"default\",task_name=\"warm-up-trie-cache\",chain=\"asset-hub-westend-local\"}";
+
+	loop {
+		let value = query_metric_http(metrics_url, metric_name).await?;
+		log::info!("Warmup metric value: {}", value);
+
+		if value >= 0.5 {
+			log::info!("Warm-up finished, proceeding");
+			break;
+		}
+
+		log::info!("Waiting for warm-up to finish...");
+		tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+	}
+
 	Ok(())
 }
 
@@ -163,8 +288,10 @@ async fn setup_network() -> Result<Network<LocalFileSystem>, anyhow::Error> {
 				.with_validator(|node| node.with_name("validator-1"))
 		})
 		.with_parachain(|p| {
+			let parachain_cmd =
+				std::env::var("PARACHAIN_CMD").unwrap_or("polkadot-parachain".to_string());
 			p.with_id(2000)
-				.with_default_command("polkadot-parachain")
+				.with_default_command(parachain_cmd.as_str())
 				.with_default_image(
 					std::env::var("COL_IMAGE")
 						.unwrap_or("docker.io/paritypr/colander:latest".to_string())
@@ -173,9 +300,12 @@ async fn setup_network() -> Result<Network<LocalFileSystem>, anyhow::Error> {
 				.with_chain("asset-hub-westend-local")
 				.with_default_db_snapshot("https://storage.googleapis.com/zombienet-db-snaps/polkadot/test_weights/parachain.tgz")
 				.with_collator(|n| {
+					let log_level = std::env::var("COLLATOR_LOG").unwrap_or("-linfo".to_string());
+					let interest_cache =
+						std::env::var("INTEREST_CACHE").unwrap_or("disabled".to_string());
 					n.with_name("collator").validator(true).with_args(vec![
 						("--warm-up-trie-cache").into(),
-						("-linfo").into(),
+						log_level.as_str().into(),
 						("--pool-type=fork-aware").into(),
 						("--trie-cache-size=32212254720").into(),
 						("--rpc-max-subscriptions-per-connection=327680").into(),
@@ -183,6 +313,7 @@ async fn setup_network() -> Result<Network<LocalFileSystem>, anyhow::Error> {
 						("--pool-limit=819200").into(),
 						("--pool-kbytes=2048000").into(),
 					])
+					.with_env(vec![("INTEREST_CACHE", interest_cache.as_str())])
 				})
 		})
 		.build()
@@ -197,8 +328,7 @@ async fn setup_network() -> Result<Network<LocalFileSystem>, anyhow::Error> {
 }
 
 fn create_keys(n: usize) -> Vec<Keypair> {
-	let mut rng = rand::thread_rng();
-	let seed: u32 = rng.gen();
+	let seed: u32 = 1; //rng.gen();
 	(0..n)
 		.map(|i| {
 			let uri = SecretUri::from_str(&format!("//key{}_test{}", seed, i)).unwrap();

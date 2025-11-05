@@ -28,6 +28,7 @@ zombienet-sdk = { workspace = true }
 pallet-revive = { workspace = true, features = ["std"] }
 asset-hub-westend-runtime = { workspace = true }
 ethabi ={ workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 [features]
 zombie-metadata = []
