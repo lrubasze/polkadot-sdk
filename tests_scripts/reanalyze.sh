@@ -47,39 +47,62 @@ echo ""
 # Configuration arrays - MUST MATCH run_test.sh exactly
 # ============================================================================
 
+# Trie cache configurations
+TRIE_CACHE_CONFIGS=(
+    "enabled"
+    "disabled"
+)
+
+TRIE_CACHE_NAMES=(
+    "tc_on"
+    "tc_off"
+)
+
 # Interest cache configurations
 INTEREST_CACHE_CONFIGS=(
     "disabled"   # explicitly disabled
+    "min_verbosity=debug,lru_cache_size=512"
     "default"    # enabled with defaults
-    # "min_verbosity=info,lru_cache_size=1024"
-    # "min_verbosity=trace,lru_cache_size=1024"
+    "min_verbosity=debug,lru_cache_size=2048"
+    "min_verbosity=info,lru_cache_size=512"
+    "min_verbosity=info,lru_cache_size=1024"
+    "min_verbosity=info,lru_cache_size=2048"
+    "min_verbosity=trace,lru_cache_size=512"
+    "min_verbosity=trace,lru_cache_size=1024"
+    "min_verbosity=trace,lru_cache_size=2048"
 )
 
 CACHE_TYPE_NAMES=(
     "disabled"
+    "min_debug_cache=512"
     "default"
-    # "min_info"
-    # "min_trace"
+    "min_debug_cache=2048"
+    "min_info_debug_cache=512"
+    "min_info_debug_cache=1024"
+    "min_info_debug_cache=2048"
+    "min_trace_debug_cache=512"
+    "min_trace_debug_cache=1024"
+    "min_trace_debug_cache=2048"
 )
 
 COLLATOR_LOGS=(
     "-linfo"
     "-linfo,parachain=debug,aura=debug"
-    # "-linfo,parachain=debug,aura=debug,alexggh=debug"
-    # "-linfo,parachain=debug,aura=debug,alexggh=trace"
+    "-linfo,parachain=debug,aura=debug,alexggh=debug"
+    "-linfo,parachain=debug,aura=debug,alexggh=trace"
     "-linfo,alexggh=debug"
     "-linfo,alexggh=trace"
-    # "-linfo,alexggh=debug,abcdefg=trace"
+    "-linfo,alexggh=debug,abcdefg=trace"
 )
 
 LOG_NAMES=(
     "info"
     "info_para_debug"
-    # "info_para_debug_al_debug"
-    # "info_para_debug_al_trace"
+    "info_para_debug_al_debug"
+    "info_para_debug_al_trace"
     "info_al_debug"
     "info_al_trace"
-    # "info_al_debug_abc_trace"
+    "info_al_debug_abc_trace"
 )
 
 # ============================================================================
@@ -88,7 +111,7 @@ LOG_NAMES=(
 
 # Create new results CSV file in current directory (not inside RUN_DIR)
 RESULTS_FILE="results_${TIMESTAMP}_reanalysis.csv"
-echo "interest_cache;log_level;blocks_analyzed;proposal_min_ms;proposal_max_ms;proposal_avg_ms;avg_extrinsics;cpu_min_pct;cpu_max_pct;cpu_avg_pct" > "$RESULTS_FILE"
+echo "trie_cache;interest_cache;log_level;blocks_analyzed;proposal_min_ms;proposal_max_ms;proposal_avg_ms;avg_extrinsics;cpu_min_pct;cpu_max_pct;cpu_avg_pct" > "$RESULTS_FILE"
 echo "Created results file: $RESULTS_FILE"
 echo ""
 
@@ -97,16 +120,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Function to reanalyze a single test configuration
 reanalyze_test() {
-    local interest_cache_config=$1
-    local collator_log_arg=$2
-    local log_name=$3
-    local cache_type=$4
+    local trie_cache_config=$1
+    local interest_cache_config=$2
+    local collator_log_arg=$3
+    local log_name=$4
+    local cache_type=$5
+    local trie_cache_name=$6
 
     # Strip the -l prefix from collator_log to get log_level
     local log_level="${collator_log_arg#-l}"
 
-    # Construct OUTPUT name: TIMESTAMP_CACHE_TYPE_LOG_NAME (same as run_test.sh)
-    local output_name="${TIMESTAMP}_${cache_type}_${log_name}"
+    # Construct OUTPUT name: TIMESTAMP_TRIE_CACHE_NAME_CACHE_TYPE_LOG_NAME (same as run_test.sh)
+    local output_name="${TIMESTAMP}_${trie_cache_name}_${cache_type}_${log_name}"
 
     # Construct file paths
     local collator_log="${RUN_DIR}/collator_${output_name}.log"
@@ -146,6 +171,7 @@ reanalyze_test() {
         --end-time "$TX_END_TIMESTAMP" \
         --output "$summary_output" \
         --csv-file "$RESULTS_FILE" \
+        --trie-cache "$trie_cache_config" \
         --interest-cache "$interest_cache_config" \
         --log-level "$log_level" 2>&1 | grep -v "^Parsing\|^Writing\|^Appending\|^Analysis complete"; then
 
@@ -158,34 +184,39 @@ reanalyze_test() {
 }
 
 # Counter for processed tests
-total_tests=$((${#INTEREST_CACHE_CONFIGS[@]} * ${#COLLATOR_LOGS[@]}))
+total_tests=$((${#TRIE_CACHE_CONFIGS[@]} * ${#INTEREST_CACHE_CONFIGS[@]} * ${#COLLATOR_LOGS[@]}))
 current_test=0
 processed=0
 failed=0
 skipped=0
 
 # Loop through all combinations in the same order as run_test.sh
-for i in "${!INTEREST_CACHE_CONFIGS[@]}"; do
-    interest_cache_config="${INTEREST_CACHE_CONFIGS[$i]}"
-    cache_type="${CACHE_TYPE_NAMES[$i]}"
+for k in "${!TRIE_CACHE_CONFIGS[@]}"; do
+    trie_cache_config="${TRIE_CACHE_CONFIGS[$k]}"
+    trie_cache_name="${TRIE_CACHE_NAMES[$k]}"
 
-    for j in "${!COLLATOR_LOGS[@]}"; do
-        collator_log="${COLLATOR_LOGS[$j]}"
-        log_name="${LOG_NAMES[$j]}"
+    for i in "${!INTEREST_CACHE_CONFIGS[@]}"; do
+        interest_cache_config="${INTEREST_CACHE_CONFIGS[$i]}"
+        cache_type="${CACHE_TYPE_NAMES[$i]}"
 
-        current_test=$((current_test + 1))
+        for j in "${!COLLATOR_LOGS[@]}"; do
+            collator_log="${COLLATOR_LOGS[$j]}"
+            log_name="${LOG_NAMES[$j]}"
 
-        echo "[$current_test/$total_tests] INTEREST_CACHE=$cache_type, LOG=$log_name"
+            current_test=$((current_test + 1))
 
-        if reanalyze_test "$interest_cache_config" "$collator_log" "$log_name" "$cache_type"; then
-            ((processed++))
-        else
-            if [ -f "${RUN_DIR}/collator_${TIMESTAMP}_${cache_type}_${log_name}.log" ]; then
-                ((failed++))
+            echo "[$current_test/$total_tests] TRIE_CACHE=$trie_cache_name, INTEREST_CACHE=$cache_type, LOG=$log_name"
+
+            if reanalyze_test "$trie_cache_config" "$interest_cache_config" "$collator_log" "$log_name" "$cache_type" "$trie_cache_name"; then
+                ((processed++))
             else
-                ((skipped++))
+                if [ -f "${RUN_DIR}/collator_${TIMESTAMP}_${trie_cache_name}_${cache_type}_${log_name}.log" ]; then
+                    ((failed++))
+                else
+                    ((skipped++))
+                fi
             fi
-        fi
+        done
     done
 done
 

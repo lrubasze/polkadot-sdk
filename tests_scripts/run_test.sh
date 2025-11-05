@@ -3,9 +3,10 @@
 # Script to run txs_per_block_test with different configurations
 # and collect log files for analysis
 #
-# Tests 12 combinations (4 cache configs × 3 log levels):
-# - INTEREST_CACHE: disabled, default, min_info, min_trace
-# - COLLATOR_LOG: info, info_debug, info_trace
+# Tests combinations of:
+# - TRIE_CACHE: enabled, disabled
+# - INTEREST_CACHE: disabled, default, various min_verbosity configs
+# - COLLATOR_LOG: info, info_para_debug, info_al_debug, etc.
 
 set -e
 
@@ -56,6 +57,17 @@ LOG_NAMES=(
     "info_al_debug_abc_trace"
 )
 
+# Trie cache configurations
+TRIE_CACHE_CONFIGS=(
+    "enabled"
+    "disabled"
+)
+
+TRIE_CACHE_NAMES=(
+    "tc_on"
+    "tc_off"
+)
+
 # Generate timestamp for this run
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
@@ -66,32 +78,35 @@ echo "Created output directory: $OUTPUT_DIR"
 
 # Create global results CSV file (in current directory, not in OUTPUT_DIR)
 RESULTS_FILE="results_${TIMESTAMP}.csv"
-echo "interest_cache;log_level;blocks_analyzed;proposal_min_ms;proposal_max_ms;proposal_avg_ms;avg_extrinsics;cpu_min_pct;cpu_max_pct;cpu_avg_pct" > "$RESULTS_FILE"
+echo "trie_cache;interest_cache;log_level;blocks_analyzed;proposal_min_ms;proposal_max_ms;proposal_avg_ms;avg_extrinsics;cpu_min_pct;cpu_max_pct;cpu_avg_pct" > "$RESULTS_FILE"
 echo "Created global results file: $RESULTS_FILE"
 
 # Function to run test with given configuration
 run_test() {
-    local interest_cache_config=$1
-    local collator_log=$2
-    local log_name=$3
-    local cache_type=$4
+    local trie_cache_config=$1
+    local interest_cache_config=$2
+    local collator_log=$3
+    local log_name=$4
+    local cache_type=$5
+    local trie_cache_name=$6
 
     # Strip the -l prefix from collator_log to get log_level
     local log_level="${collator_log#-l}"
 
-    # Construct OUTPUT name: TIMESTAMP_CACHE_TYPE_LOG_NAME
-    local output_name="${TIMESTAMP}_${cache_type}_${log_name}"
+    # Construct OUTPUT name: TIMESTAMP_TRIE_CACHE_NAME_CACHE_TYPE_LOG_NAME
+    local output_name="${TIMESTAMP}_${trie_cache_name}_${cache_type}_${log_name}"
 
     echo "========================================"
     echo "Running test with:"
+    echo "  TRIE_CACHE: $trie_cache_config"
     echo "  INTEREST_CACHE: $interest_cache_config"
     echo "  LOG_LEVEL: $log_level"
     echo "  OUTPUT: $output_name"
     echo "  OUTPUT_DIR: $OUTPUT_DIR"
     echo "========================================"
 
-    # Call test.sh with parameters (including global results file and output directory)
-    ./test.sh "$interest_cache_config" "$log_level" "$output_name" "$RESULTS_FILE" "$OUTPUT_DIR"
+    # Call test.sh with parameters (including global results file, output directory, and trie cache config)
+    ./test.sh "$interest_cache_config" "$log_level" "$output_name" "$RESULTS_FILE" "$OUTPUT_DIR" "$trie_cache_config"
 
     echo ""
 }
@@ -101,25 +116,30 @@ echo "Starting txs_per_block test suite"
 echo "Run timestamp: $TIMESTAMP"
 echo ""
 
-total_tests=$((${#INTEREST_CACHE_CONFIGS[@]} * ${#COLLATOR_LOGS[@]}))
+total_tests=$((${#TRIE_CACHE_CONFIGS[@]} * ${#INTEREST_CACHE_CONFIGS[@]} * ${#COLLATOR_LOGS[@]}))
 current_test=0
 
 # Loop through all combinations
-for i in "${!INTEREST_CACHE_CONFIGS[@]}"; do
-    interest_cache_config="${INTEREST_CACHE_CONFIGS[$i]}"
-    cache_type="${CACHE_TYPE_NAMES[$i]}"
+for k in "${!TRIE_CACHE_CONFIGS[@]}"; do
+    trie_cache_config="${TRIE_CACHE_CONFIGS[$k]}"
+    trie_cache_name="${TRIE_CACHE_NAMES[$k]}"
 
-    for j in "${!COLLATOR_LOGS[@]}"; do
-        collator_log="${COLLATOR_LOGS[$j]}"
-        log_name="${LOG_NAMES[$j]}"
+    for i in "${!INTEREST_CACHE_CONFIGS[@]}"; do
+        interest_cache_config="${INTEREST_CACHE_CONFIGS[$i]}"
+        cache_type="${CACHE_TYPE_NAMES[$i]}"
 
-        current_test=$((current_test + 1))
+        for j in "${!COLLATOR_LOGS[@]}"; do
+            collator_log="${COLLATOR_LOGS[$j]}"
+            log_name="${LOG_NAMES[$j]}"
 
-        echo "Progress: Test $current_test of $total_tests"
-        run_test "$interest_cache_config" "$collator_log" "$log_name" "$cache_type"
+            current_test=$((current_test + 1))
 
-        # Optional: Add a small delay between tests
-        sleep 2
+            echo "Progress: Test $current_test of $total_tests"
+            run_test "$trie_cache_config" "$interest_cache_config" "$collator_log" "$log_name" "$cache_type" "$trie_cache_name"
+
+            # Optional: Add a small delay between tests
+            sleep 2
+        done
     done
 done
 

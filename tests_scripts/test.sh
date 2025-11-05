@@ -7,6 +7,7 @@ LOG_LEVEL=${2:-info,alexgg=debug,parachain=debug}
 OUTPUT=${3:-output}
 RESULTS_FILE=${4:-""}
 OUTPUT_DIR=${5:-"."}
+TRIE_CACHE=${6:-enabled}  # "enabled" or "disabled"
 
 TEST_DIR=test1
 TSTAMP=$(date +%Y%m%d_%H%M%S)
@@ -18,12 +19,15 @@ sleep 2
 COLLATOR_LOG=${TEST_DIR}/collator.log
 TOP_OUTPUT="${OUTPUT_DIR}/top_${OUTPUT}.log"
 # launch collator
-INTEREST_CACHE=$INTEREST_CACHE ./node_launch.sh $TEST_DIR collator $LOG_LEVEL $TOP_OUTPUT
+INTEREST_CACHE=$INTEREST_CACHE ./node_launch.sh $TEST_DIR collator $LOG_LEVEL $TOP_OUTPUT $TRIE_CACHE
 
 # give some time for collator to sync
 sleep 60
 
-./warmup_cache_wait.sh
+# Only wait for cache warmup if trie cache is enabled
+if [ "$TRIE_CACHE" == "enabled" ]; then
+    ./warmup_cache_wait.sh
+fi
 
 # submit_transactions
 
@@ -74,7 +78,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Run Python analysis - it will output summary and optionally append to CSV
 CSV_ARGS=""
 if [ -n "$RESULTS_FILE" ]; then
-    CSV_ARGS="--csv-file $RESULTS_FILE --interest-cache $INTEREST_CACHE --log-level $LOG_LEVEL"
+    CSV_ARGS="--csv-file $RESULTS_FILE --trie-cache $TRIE_CACHE --interest-cache $INTEREST_CACHE --log-level $LOG_LEVEL"
 fi
 
 python3 "${SCRIPT_DIR}/analyze_metrics.py" \

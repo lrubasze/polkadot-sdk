@@ -396,6 +396,7 @@ class OutputFormatter:
     @staticmethod
     def append_to_csv(
         csv_path: Path,
+        trie_cache: str,
         interest_cache: str,
         log_level: str,
         results: AnalysisResults
@@ -403,12 +404,12 @@ class OutputFormatter:
         """
         Append results to CSV file.
 
-        CSV format: interest_cache;log_level;blocks_analyzed;proposal_min_ms;proposal_max_ms;
+        CSV format: trie_cache;interest_cache;log_level;blocks_analyzed;proposal_min_ms;proposal_max_ms;
                     proposal_avg_ms;avg_extrinsics;cpu_min_pct;cpu_max_pct;cpu_avg_pct
         """
         try:
             with open(csv_path, 'a') as f:
-                f.write(f"{interest_cache};{log_level};{results.filtered_blocks_count};"
+                f.write(f"{trie_cache};{interest_cache};{log_level};{results.filtered_blocks_count};"
                        f"{results.min_duration_ms};{results.max_duration_ms};"
                        f"{results.avg_duration_ms:.2f};{results.avg_extrinsics:.2f};"
                        f"{results.min_cpu_percent:.2f};{results.max_cpu_percent:.2f};"
@@ -458,6 +459,10 @@ def main():
         help='CSV file to append results to (optional)'
     )
     parser.add_argument(
+        '--trie-cache',
+        help='Trie cache configuration (for CSV output)'
+    )
+    parser.add_argument(
         '--interest-cache',
         help='Interest cache configuration (for CSV output)'
     )
@@ -505,14 +510,15 @@ def main():
 
     # Append to CSV if requested
     if args.csv_file:
-        if not args.interest_cache or not args.log_level:
-            print("Error: --interest-cache and --log-level required for CSV output",
+        if not args.trie_cache or not args.interest_cache or not args.log_level:
+            print("Error: --trie-cache, --interest-cache, and --log-level required for CSV output",
                   file=sys.stderr)
             sys.exit(1)
 
         print(f"Appending results to: {args.csv_file}", file=sys.stderr)
         formatter.append_to_csv(
             args.csv_file,
+            args.trie_cache,
             args.interest_cache,
             args.log_level,
             results
