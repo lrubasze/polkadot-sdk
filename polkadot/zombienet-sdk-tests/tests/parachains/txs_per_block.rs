@@ -9,7 +9,6 @@ mod ahw {}
 use anyhow::anyhow;
 use dashmap::DashMap;
 use futures::{stream::FuturesUnordered, StreamExt};
-use rand::Rng;
 use sp_core::H256;
 use std::{
 	str::FromStr,
@@ -40,7 +39,8 @@ async fn txs_per_block_test_2() -> Result<(), anyhow::Error> {
 		env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
 	);
 
-	let para_client: OnlineClient<PolkadotConfig> = OnlineClient::from_insecure_url("ws://127.0.0.1:62636").await.unwrap();
+	let para_client: OnlineClient<PolkadotConfig> =
+		OnlineClient::from_insecure_url("ws://127.0.0.1:62636").await.unwrap();
 
 	log::info!("Assuming network is ready");
 
@@ -365,7 +365,7 @@ async fn setup_network() -> Result<Network<LocalFileSystem>, anyhow::Error> {
 
 fn create_keys(n: usize) -> Vec<Keypair> {
 	// let mut rng = rand::thread_rng();
-	let seed: u32 = 1;//rng.gen();
+	let seed: u32 = 1; //rng.gen();
 	(0..n)
 		.map(|i| {
 			let uri = SecretUri::from_str(&format!("//key{}_perblock{}", seed, i)).unwrap();
