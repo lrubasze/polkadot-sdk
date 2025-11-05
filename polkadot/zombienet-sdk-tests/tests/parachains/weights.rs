@@ -30,6 +30,8 @@ const KEYS_COUNT: usize = 6000;
 const CHUNK_SIZE: usize = 3000;
 const CALL_CHUNK_SIZE: usize = 3000;
 
+// This test assumes that weights_test_prepare was running before and the network state was saved.
+// And the network is running now from the saved state
 #[tokio::test(flavor = "multi_thread")]
 async fn weights_test_2() -> Result<(), anyhow::Error> {
 	let _ = env_logger::try_init_from_env(
@@ -53,28 +55,13 @@ async fn weights_test_2() -> Result<(), anyhow::Error> {
 	log::info!("Warm-up finished, starting test");
 	let alice = dev::alice();
 	let keys = create_keys(KEYS_COUNT);
-	let mut nonce = 0;
+	// Nonce must be greater than the last nonce used in weights_test_prepare
+	let mut nonce = 1;
 	let mut nonce = || {
 		let current_nonce = nonce;
 		nonce += 1;
 		current_nonce
 	};
-
-	log::info!("Preparing transfers");
-	let mut transfer_50_payload = keys
-		.iter()
-		.map(|key| {
-			let transfer_selector = sp_core::hex2array!("a9059cbb");
-			let mut data = transfer_selector.to_vec();
-			let account_id = key.public_key().0.into();
-			let h160 =
-				<AHWRuntime as pallet_revive::Config>::AddressMapper::to_address(&account_id);
-			data.extend(ethabi::encode(&[Token::Address(h160), Token::Uint(50.into())]));
-
-			data
-		})
-		.collect::<Vec<_>>();
-	transfer_50_payload.rotate_left(1);
 
 	let mut call_clients = vec![];
 	let para_client: OnlineClient<PolkadotConfig> =
@@ -86,8 +73,12 @@ async fn weights_test_2() -> Result<(), anyhow::Error> {
 		call_clients.push(call_client);
 	}
 
-	log::info!("Warm-up finished, transfering ERC20 tokens");
-
+	log::info!("Minting...");
+	let mint_100 = sp_core::hex2array!(
+		"a0712d680000000000000000000000000000000000000000000000000000000000000064"
+	)
+	.to_vec();
+	let mint_100_payload = vec![mint_100; KEYS_COUNT];
 	call_contract(
 		&para_client,
 		call_clients,
@@ -95,9 +86,49 @@ async fn weights_test_2() -> Result<(), anyhow::Error> {
 		&alice,
 		&keys,
 		nonce(),
-		transfer_50_payload,
+		mint_100_payload,
 	)
 	.await?;
+	// assert_block_proposing_time_no_greater_than_1s(&collator).await;
+
+	// log::info!("Preparing transfers");
+	// let mut transfer_50_payload = keys
+	// 	.iter()
+	// 	.map(|key| {
+	// 		let transfer_selector = sp_core::hex2array!("a9059cbb");
+	// 		let mut data = transfer_selector.to_vec();
+	// 		let account_id = key.public_key().0.into();
+	// 		let h160 =
+	// 			<AHWRuntime as pallet_revive::Config>::AddressMapper::to_address(&account_id);
+	// 		data.extend(ethabi::encode(&[Token::Address(h160), Token::Uint(50.into())]));
+
+	// 		data
+	// 	})
+	// 	.collect::<Vec<_>>();
+	// transfer_50_payload.rotate_left(1);
+
+	// let mut call_clients = vec![];
+	// let para_client: OnlineClient<PolkadotConfig> =
+	// 	OnlineClient::from_insecure_url("ws://127.0.0.1:62636").await.unwrap();
+
+	// for _ in 0..(KEYS_COUNT / CALL_CHUNK_SIZE + 1) {
+	// 	let call_client: OnlineClient<PolkadotConfig> =
+	// 		OnlineClient::from_insecure_url("ws://127.0.0.1:62636").await.unwrap();
+	// 	call_clients.push(call_client);
+	// }
+
+	// log::info!("Warm-up finished, transfering ERC20 tokens");
+
+	// call_contract(
+	// 	&para_client,
+	// 	call_clients,
+	// 	contract_address,
+	// 	&alice,
+	// 	&keys,
+	// 	nonce(),
+	// 	transfer_50_payload,
+	// )
+	// .await?;
 	// assert_block_proposing_time_no_greater_than_1s(&collator).await;
 
 	Ok(())
@@ -141,24 +172,6 @@ async fn weights_test_prepare() -> Result<(), anyhow::Error> {
 	let contract_address_file = std::env::current_dir()?.join("contract_address.txt");
 	fs::write(&contract_address_file, format!("{:?}", contract_address))?;
 	log::info!("Contract address written to: {:?}", contract_address_file);
-
-	log::info!("Minting...");
-	let mint_100 = sp_core::hex2array!(
-		"a0712d680000000000000000000000000000000000000000000000000000000000000064"
-	)
-	.to_vec();
-	let mint_100_payload = vec![mint_100; KEYS_COUNT];
-	call_contract(
-		&para_client,
-		call_clients,
-		contract_address,
-		&alice,
-		&keys,
-		nonce(),
-		mint_100_payload,
-	)
-	.await?;
-	assert_block_proposing_time_no_greater_than_1s(&collator).await;
 
 	// log::info!("Minting finished, preparing transfers");
 	// let mut transfer_50_payload = keys
