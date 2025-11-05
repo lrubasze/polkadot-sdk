@@ -23,6 +23,8 @@ INTEREST_CACHE=$INTEREST_CACHE ./node_launch.sh $TEST_DIR collator $LOG_LEVEL $T
 # give some time for collator to sync
 sleep 60
 
+./warmup_cache_wait.sh
+
 # submit_transactions
 
 # Record timestamps for filtering logs (more reliable than writing markers to active log files)
@@ -32,7 +34,8 @@ echo "TX_START: $TX_START_TIMESTAMP (epoch: $TX_START_TIME)"
 
 RUST_LOG=info,zombienet_orchestrator=debug \
 ZOMBIE_PROVIDER=native \
-cargo test --release -p polkadot-zombienet-sdk-tests --features zombie-metadata,zombie-ci txs_per_block_test_2 -- --no-capture
+# cargo test --release -p polkadot-zombienet-sdk-tests --features zombie-metadata,zombie-ci txs_per_block_test_2 -- --no-capture
+cargo test --release -p polkadot-zombienet-sdk-tests --features zombie-metadata,zombie-ci weights_test_2 -- --no-capture
 # cargo nextest run --release -p polkadot-zombienet-sdk-tests --features zombie-metadata,zombie-ci --no-capture txs_per_block_test_2
 
 TX_END_TIME=$(date +%s)
