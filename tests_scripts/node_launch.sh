@@ -27,13 +27,18 @@ elif [ "$WHAT" == "validator-1" ] ; then
     node_metrics="http://127.0.0.1:62631/metrics"
 
 elif [ "$WHAT" == "collator" ] ; then
+    # --trie-cache-size=32212254720 --warm-up-trie-cache
+    # or
+    # --trie-cache-size=0
 
     cmd="polkadot-parachain --chain ${BASE_DIR}/collator/cfg/2000.json --name collator --rpc-cors all \
             --rpc-methods unsafe --node-key 53cf10627db4ce8abcddad56fc510cdfc58bfe587b0cbb6772f1f0727266e565 \
             --prometheus-external --collator --prometheus-port 62637 --rpc-port 62636 --listen-addr /ip4/0.0.0.0/tcp/62638/ws \
-            --base-path ${BASE_DIR}/collator/data --warm-up-trie-cache \
+            --base-path ${BASE_DIR}/collator/data \
+            --trie-cache-size=0 \
             -l${LOG_LEVEL} \
-            --pool-type=fork-aware --trie-cache-size=32212254720 --rpc-max-subscriptions-per-connection=327680 \
+            --pool-type=fork-aware \
+            --rpc-max-subscriptions-per-connection=327680 \
             --rpc-max-connections=102400 --pool-limit=819200 --pool-kbytes=2048000 \
             -- \
             --base-path ${BASE_DIR}/collator/relay-data --chain ${BASE_DIR}/collator/cfg/westend-local.json \

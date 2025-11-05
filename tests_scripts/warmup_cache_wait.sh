@@ -11,5 +11,9 @@ while true; do
       echo "Warm-up finished!"
       break
     fi
+    if [ "$value" == "" ];  then
+        echo "No warm-up needed!"
+        break
+    fi
     sleep 10
   done
