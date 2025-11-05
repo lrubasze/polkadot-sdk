@@ -54,7 +54,7 @@ echo "Created output directory: $OUTPUT_DIR"
 
 # Create global results CSV file (in current directory, not in OUTPUT_DIR)
 RESULTS_FILE="results_${TIMESTAMP}.csv"
-echo "interest_cache,log_level,proposal_min_ms,proposal_max_ms,proposal_avg_ms,cpu_min_pct,cpu_max_pct,cpu_avg_pct" > "$RESULTS_FILE"
+echo "interest_cache;log_level;proposal_min_ms;proposal_max_ms;proposal_avg_ms;cpu_min_pct;cpu_max_pct;cpu_avg_pct" > "$RESULTS_FILE"
 echo "Created global results file: $RESULTS_FILE"
 
 # Function to run test with given configuration
