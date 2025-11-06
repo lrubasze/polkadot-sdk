@@ -1176,9 +1176,10 @@ polkadot-test-service = { path = "polkadot/node/test/service" }
 # polkavm = { version = "0.26.0", default-features = false }
 # polkavm-derive = "0.26.0"
 # polkavm-linker = "0.26.0"
-polkavm = { path = "../polkavm/crates/polkavm" }
-polkavm-derive = { path = "../polkavm/crates/polkavm-derive" }
-polkavm-linker = { path = "../polkavm/crates/polkavm-linker" }
+polkavm = { path = "/Users/lukasz/work/paritytech/polkavm/crates/polkavm" }
+polkavm-derive = { path = "/Users/lukasz/work/paritytech/polkavm/crates/polkavm-derive" }
+polkavm-linker = { path = "/Users/lukasz/work/paritytech/polkavm/crates/polkavm-linker" }
+# polkavm-common = { path = "/Users/lukasz/work/paritytech/polkavm/crates/polkavm-common" }
 
 portpicker = { version = "0.1.1" }
 pretty_assertions = { version = "1.3.0" }
