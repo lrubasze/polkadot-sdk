@@ -135,8 +135,14 @@ Polkadot SDK supports multiple sync strategies:
 
 1. **Initial Sync:** Download all blocks from genesis
 2. **Warp Sync:** Jump to finalized state using cryptographic proofs
-3. **Gap Sync:** Fill missing blocks after warp sync
-4. **Live Sync:** Process blocks as they arrive
+3. **State Sync:** Download state (trie nodes) for warp sync target block
+4. **Gap Sync:** Fill missing blocks after warp sync and state sync
+5. **Live Sync:** Process blocks as they arrive
+
+**Complete Warp Sync Flow:**
+```
+WarpSync → StateSync → ChainSync (includes GapSync) → Live
+```
 
 Each phase has different verification requirements and performance characteristics.
 
@@ -305,6 +311,14 @@ pub enum SyncState {
         current: u64,
     },
 
+    /// Downloading state for warp sync target
+    StateSyncing {
+        /// Target block for which we're downloading state
+        target_block: u64,
+        /// Progress (0-100)
+        progress_percent: u8,
+    },
+
     /// Filling gaps after warp sync
     GapFilling {
         /// Gap range being filled
@@ -347,7 +361,10 @@ impl SyncState {
 
     /// Is this a "fast sync" mode where we can skip expensive ops?
     pub fn is_fast_sync(&self) -> bool {
-        matches!(self, Self::WarpSyncing { .. } | Self::GapFilling { .. })
+        matches!(
+            self,
+            Self::WarpSyncing { .. } | Self::StateSyncing { .. } | Self::GapFilling { .. }
+        )
     }
 }
 ```
@@ -510,14 +527,26 @@ impl<Block: BlockT> SyncStateManager<Block> {
 
         // State transition logic
         let new_state = match (self.current_state, origin, has_gap) {
-            // Warp sync completed, transition to gap filling
-            (SyncState::WarpSyncing { target, .. }, BlockOrigin::WarpSync, true)
+            // Warp sync completed, transition to state sync
+            (SyncState::WarpSyncing { target, .. }, BlockOrigin::WarpSync, _)
                 if block_num >= target => {
-                if let Some(gap) = &self.gap_info {
-                    SyncState::GapFilling {
-                        gap_start: gap.start.saturated_into(),
-                        gap_end: gap.end.saturated_into(),
-                        current: gap.start.saturated_into(),
+                SyncState::StateSyncing {
+                    target_block: target,
+                    progress_percent: 0,
+                }
+            }
+
+            // State sync completed, transition to gap filling or live
+            (SyncState::StateSyncing { target_block, .. }, _, has_gap) => {
+                if has_gap {
+                    if let Some(gap) = &self.gap_info {
+                        SyncState::GapFilling {
+                            gap_start: gap.start.saturated_into(),
+                            gap_end: gap.end.saturated_into(),
+                            current: gap.start.saturated_into(),
+                        }
+                    } else {
+                        SyncState::Live
                     }
                 } else {
                     SyncState::Live
@@ -568,6 +597,7 @@ impl<Block: BlockT> SyncStateManager<Block> {
     pub fn origin_for_downloaded_block(&self) -> BlockOrigin {
         match self.current_state {
             SyncState::WarpSyncing { .. } => BlockOrigin::WarpSync,
+            SyncState::StateSyncing { .. } => BlockOrigin::NetworkInitialSync, // TODO: Consider BlockOrigin::StateSync
             SyncState::GapFilling { .. } => BlockOrigin::GapSync,
             SyncState::InitialSyncing { .. } => BlockOrigin::NetworkInitialSync,
             SyncState::Live => BlockOrigin::NetworkBroadcast,
@@ -598,7 +628,9 @@ impl SyncStateTransition {
     pub fn completed_phase(&self) -> bool {
         matches!(
             (&self.from, &self.to),
-            (SyncState::WarpSyncing { .. }, SyncState::GapFilling { .. }) |
+            (SyncState::WarpSyncing { .. }, SyncState::StateSyncing { .. }) |
+            (SyncState::StateSyncing { .. }, SyncState::GapFilling { .. }) |
+            (SyncState::StateSyncing { .. }, SyncState::Live) |
             (SyncState::GapFilling { .. }, SyncState::Live) |
             (SyncState::InitialSyncing { .. }, SyncState::Live)
         )
@@ -607,8 +639,14 @@ impl SyncStateTransition {
     /// Get human-readable description
     pub fn description(&self) -> String {
         match (&self.from, &self.to) {
-            (SyncState::WarpSyncing { .. }, SyncState::GapFilling { .. }) => {
-                "Warp sync completed, starting gap fill".to_string()
+            (SyncState::WarpSyncing { .. }, SyncState::StateSyncing { .. }) => {
+                "Warp sync completed, starting state sync".to_string()
+            }
+            (SyncState::StateSyncing { .. }, SyncState::GapFilling { .. }) => {
+                "State sync completed, starting gap fill".to_string()
+            }
+            (SyncState::StateSyncing { .. }, SyncState::Live) => {
+                "State sync completed, node fully synced".to_string()
             }
             (SyncState::GapFilling { .. }, SyncState::Live) => {
                 "Gap fill completed, node fully synced".to_string()
@@ -634,6 +672,7 @@ impl SyncPolicy {
         matches!(
             state,
             SyncState::WarpSyncing { .. } |
+            SyncState::StateSyncing { .. } |
             SyncState::InitialSyncing { .. } |
             SyncState::GapFilling { .. }
         )
@@ -643,6 +682,7 @@ impl SyncPolicy {
     pub fn batch_commit_size(state: &SyncState) -> usize {
         match state {
             SyncState::WarpSyncing { .. } => 1000,
+            SyncState::StateSyncing { .. } => 500,
             SyncState::GapFilling { .. } => 500,
             SyncState::InitialSyncing { .. } => 100,
             SyncState::Live => 1,
@@ -658,6 +698,7 @@ impl SyncPolicy {
     pub fn max_acceptable_gap_size(state: &SyncState) -> Option<u64> {
         match state {
             SyncState::WarpSyncing { .. } => Some(1_000_000),
+            SyncState::StateSyncing { .. } => Some(1_000_000),
             SyncState::GapFilling { .. } => Some(100_000),
             SyncState::InitialSyncing { .. } => Some(10_000),
             SyncState::Live => Some(10),
@@ -786,18 +827,41 @@ mod tests {
     }
 
     #[test]
-    fn state_transitions_warp_to_gap() {
+    fn state_transitions_warp_to_state_sync() {
         let mut manager = SyncStateManager::<Block>::new_warp_sync(1000);
 
+        // Warp sync completes at target block
         let transition = manager.on_block_imported(
             BlockOrigin::WarpSync,
+            1000,
+            false, // no gap yet
+        );
+
+        assert!(transition.is_some());
+        let t = transition.unwrap();
+        assert!(matches!(t.from, SyncState::WarpSyncing { .. }));
+        assert!(matches!(t.to, SyncState::StateSyncing { .. }));
+        assert!(t.completed_phase());
+    }
+
+    #[test]
+    fn state_transitions_state_to_gap() {
+        let mut manager = SyncStateManager::<Block>::new();
+        manager.current_state = SyncState::StateSyncing {
+            target_block: 1000,
+            progress_percent: 100,
+        };
+
+        // State sync completes, gap exists
+        let transition = manager.on_block_imported(
+            BlockOrigin::NetworkInitialSync,
             1000,
             true, // has gap
         );
 
         assert!(transition.is_some());
         let t = transition.unwrap();
-        assert!(matches!(t.from, SyncState::WarpSyncing { .. }));
+        assert!(matches!(t.from, SyncState::StateSyncing { .. }));
         assert!(matches!(t.to, SyncState::GapFilling { .. }));
         assert!(t.completed_phase());
     }
