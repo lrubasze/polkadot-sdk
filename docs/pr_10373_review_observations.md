@@ -162,6 +162,64 @@ info!(target: LOG_TARGET, "State sync is complete, continuing with block sync.")
 
 ---
 
+### 🔴 CRITICAL: Concurrent Live Block Import During Sync
+
+**Issue:** During warp sync, state sync, and gap sync, nodes **concurrently** receive and import live blocks being broadcast on the network. This critical behavior is not documented in the PR.
+
+**Evidence:**
+```rust
+// substrate/client/network/sync/src/strategy/polkadot.rs:124-140
+fn on_validated_block_announce(...) {
+    let new_best = if let Some(ref mut warp) = self.warp {
+        warp.on_validated_block_announce(...)  // ← Warp sync handles live blocks!
+    } else if let Some(ref mut state) = self.state {
+        state.on_validated_block_announce(...) // ← State sync too!
+    } else if let Some(ref mut chain_sync) = self.chain_sync {
+        chain_sync.on_validated_block_announce(...) // ← Gap sync too!
+    }
+}
+```
+
+**What Actually Happens:**
+```
+During Gap Sync:
+├── Gap Sync: Importing block #500 (BlockOrigin::GapSync)
+├── Live Block: Importing block #1,000,500 (BlockOrigin::NetworkBroadcast)
+├── Gap Sync: Importing block #501 (BlockOrigin::GapSync)
+└── Live Block: Importing block #1,000,501 (BlockOrigin::NetworkBroadcast)
+```
+
+**Both processes run concurrently!**
+
+**Implications:**
+
+1. **Mixed Origin Imports:** Import queue receives blocks with different origins simultaneously
+2. **State Not Purely Linear:** Can't say node is "in GapSync state" - it's "in GapSync + processing live blocks"
+3. **Best Block Advances:** Best block can be at #1,000,500 while gap sync is only at #500
+4. **Verification Requirements:** Live blocks during sync MUST still get full verification
+5. **Resource Contention:** Two sync processes compete for resources
+
+**Impact on Design:**
+- Sync Strategy Module needs to handle concurrent imports
+- `SyncState` enum should track both historical and live progress
+- Verification policies must account for concurrent origins
+- Testing must cover concurrent import scenarios
+
+**Recommendation:**
+1. ✅ Document this concurrent behavior explicitly (created `concurrent_sync_behavior.md`)
+2. Update Sync Strategy Module design to handle concurrent imports
+3. Add tests for concurrent import scenarios:
+   - Live blocks during warp sync
+   - Live blocks during gap sync
+   - Mixed origin import queue
+4. Verify import queue handles mixed origins correctly
+5. Consider priority queue for live blocks vs historical blocks
+6. Ensure live blocks always get full verification even during fast sync
+
+**Detailed Analysis:** See `docs/concurrent_sync_behavior.md`
+
+---
+
 ### 🟡 Code Duplication in Consensus Modules
 
 **Issue:** BABE and GRANDPA both duplicate the same verification-skipping logic.
