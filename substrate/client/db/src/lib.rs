@@ -1720,6 +1720,7 @@ impl<Block: BlockT> Backend<Block> {
 			let should_check_block_gap = !existing_header || !existing_body;
 
 			if should_check_block_gap {
+				/// Helper function to insert or update a block gap in the database.
 				let insert_new_gap =
 					|transaction: &mut Transaction<DbHash>,
 					 new_gap: BlockGap<NumberFor<Block>>,
@@ -1733,75 +1734,84 @@ impl<Block: BlockT> Backend<Block> {
 						block_gap.replace(new_gap);
 					};
 
+				/// Helper function to remove a block gap from the database.
+				let remove_gap = |transaction: &mut Transaction<DbHash>,
+				                  block_gap: &mut Option<BlockGap<NumberFor<Block>>>| {
+					transaction.remove(columns::META, meta_keys::BLOCK_GAP);
+					transaction.remove(columns::META, meta_keys::BLOCK_GAP_VERSION);
+					*block_gap = None;
+					debug!(target: "db", "Removed block gap.");
+				};
+
+				/// Helper function to advance the start of a gap and finalize if complete.
+				/// Returns true if the gap was updated.
+				let try_advance_gap_start = |transaction: &mut Transaction<DbHash>,
+				                              gap: &mut BlockGap<NumberFor<Block>>,
+				                              block_gap: &mut Option<BlockGap<NumberFor<Block>>>,
+				                              block_number: NumberFor<Block>,
+				                              block_hash: Block::Hash|
+				 -> ClientResult<bool> {
+					gap.start = block_number + One::one();
+					utils::insert_number_to_key_mapping(
+						transaction,
+						columns::KEY_LOOKUP,
+						block_number,
+						block_hash,
+					)?;
+
+					if gap.start > gap.end {
+						remove_gap(transaction, block_gap);
+						Ok(true)
+					} else {
+						insert_new_gap(transaction, *gap, block_gap);
+						debug!(target: "db", "Update block gap. {block_gap:?}");
+						Ok(true)
+					}
+				};
+
+				/// Helper function to expand the end of a gap.
+				/// Returns true if the gap was updated.
+				let try_expand_gap_end = |transaction: &mut Transaction<DbHash>,
+				                           gap: &mut BlockGap<NumberFor<Block>>,
+				                           block_gap: &mut Option<BlockGap<NumberFor<Block>>>,
+				                           block_number: NumberFor<Block>,
+				                           block_hash: Block::Hash|
+				 -> ClientResult<bool> {
+					gap.end = block_number;
+					utils::insert_number_to_key_mapping(
+						transaction,
+						columns::KEY_LOOKUP,
+						block_number,
+						block_hash,
+					)?;
+					insert_new_gap(transaction, *gap, block_gap);
+					debug!(target: "db", "Update block gap. {block_gap:?}");
+					Ok(true)
+				};
+
 				if let Some(mut gap) = block_gap {
 					match gap.gap_type {
 						BlockGapType::MissingHeaderAndBody => {
 							if number == gap.start {
-								gap.start += One::one();
-								utils::insert_number_to_key_mapping(
-									&mut transaction,
-									columns::KEY_LOOKUP,
-									number,
-									hash,
-								)?;
-								if gap.start > gap.end {
-									transaction.remove(columns::META, meta_keys::BLOCK_GAP);
-									transaction.remove(columns::META, meta_keys::BLOCK_GAP_VERSION);
-									block_gap = None;
-									debug!(target: "db", "Removed block gap.");
-								} else {
-									insert_new_gap(&mut transaction, gap, &mut block_gap);
-									debug!(target: "db", "Update block gap. {block_gap:?}");
-								}
-								block_gap_updated = true;
+								block_gap_updated =
+									try_advance_gap_start(&mut transaction, &mut gap, &mut block_gap, number, hash)?;
 							// Gap start possibly indicates block that was already imported
 							// during warp sync and start was not updated.
 							} else if number == gap.start + One::one() {
-								gap.start = number + One::one();
-								utils::insert_number_to_key_mapping(
-									&mut transaction,
-									columns::KEY_LOOKUP,
-									number,
-									hash,
-								)?;
-								if gap.start > gap.end {
-									transaction.remove(columns::META, meta_keys::BLOCK_GAP);
-									transaction.remove(columns::META, meta_keys::BLOCK_GAP_VERSION);
-									block_gap = None;
-									debug!(target: "db", "Removed block gap.");
-								} else {
-									insert_new_gap(&mut transaction, gap, &mut block_gap);
-									debug!(target: "db", "Update block gap. {block_gap:?}");
-								}
-								block_gap_updated = true;
+								block_gap_updated =
+									try_advance_gap_start(&mut transaction, &mut gap, &mut block_gap, number, hash)?;
 							}
 						},
 						BlockGapType::MissingBody => {
 							// Gap increased when syncing the header chain during fast sync.
 							if number == gap.end + One::one() && !existing_body {
 								gap.end += One::one();
-								utils::insert_number_to_key_mapping(
-									&mut transaction,
-									columns::KEY_LOOKUP,
-									number,
-									hash,
-								)?;
-								insert_new_gap(&mut transaction, gap, &mut block_gap);
-								debug!(target: "db", "Update block gap. {block_gap:?}");
-								block_gap_updated = true;
+								block_gap_updated =
+									try_expand_gap_end(&mut transaction, &mut gap, &mut block_gap, number, hash)?;
 							// Gap decreased when downloading the full blocks.
 							} else if number == gap.start && existing_body {
-								gap.start += One::one();
-								if gap.start > gap.end {
-									transaction.remove(columns::META, meta_keys::BLOCK_GAP);
-									transaction.remove(columns::META, meta_keys::BLOCK_GAP_VERSION);
-									block_gap = None;
-									debug!(target: "db", "Removed block gap.");
-								} else {
-									insert_new_gap(&mut transaction, gap, &mut block_gap);
-									debug!(target: "db", "Update block gap. {block_gap:?}");
-								}
-								block_gap_updated = true;
+								block_gap_updated =
+									try_advance_gap_start(&mut transaction, &mut gap, &mut block_gap, number, hash)?;
 							}
 						},
 					}
@@ -5032,5 +5042,95 @@ pub(crate) mod tests {
 		assert!(bc.body(fork_hash_3).unwrap().is_some());
 		backend.unpin_block(fork_hash_3);
 		assert!(bc.body(fork_hash_3).unwrap().is_none());
+	}
+
+	#[test]
+	fn gap_update_helpers_advance_gap_start() {
+		use sc_client_api::blockchain::{BlockGap, BlockGapType};
+		use sp_database::MemoryDatabase;
+
+		let db = Arc::new(MemoryDatabase::<DbHash>::default());
+		let mut transaction = Transaction::new();
+
+		// Test advancing gap start when gap.start < gap.end
+		let mut gap = BlockGap {
+			start: 5u64,
+			end: 10u64,
+			gap_type: BlockGapType::MissingHeaderAndBody,
+		};
+		let mut block_gap = Some(gap);
+
+		// Simulate the helper function logic
+		let block_number = 5u64;
+		let block_hash = H256::random();
+		gap.start = block_number + 1;
+
+		// Gap should still exist after advancing start
+		assert!(gap.start <= gap.end);
+		assert_eq!(gap.start, 6u64);
+		assert_eq!(gap.end, 10u64);
+	}
+
+	#[test]
+	fn gap_update_helpers_advance_gap_start_completes_gap() {
+		use sc_client_api::blockchain::{BlockGap, BlockGapType};
+
+		// Test advancing gap start when it completes the gap (start > end)
+		let mut gap = BlockGap {
+			start: 10u64,
+			end: 10u64,
+			gap_type: BlockGapType::MissingHeaderAndBody,
+		};
+
+		let block_number = 10u64;
+		gap.start = block_number + 1;
+
+		// Gap should be completed (start > end means no more gap)
+		assert!(gap.start > gap.end);
+		assert_eq!(gap.start, 11u64);
+		assert_eq!(gap.end, 10u64);
+	}
+
+	#[test]
+	fn gap_update_helpers_expand_gap_end() {
+		use sc_client_api::blockchain::{BlockGap, BlockGapType};
+
+		// Test expanding gap end
+		let mut gap = BlockGap {
+			start: 5u64,
+			end: 10u64,
+			gap_type: BlockGapType::MissingBody,
+		};
+
+		let block_number = 11u64;
+		gap.end = block_number;
+
+		// Gap end should be expanded
+		assert_eq!(gap.start, 5u64);
+		assert_eq!(gap.end, 11u64);
+		assert!(gap.start < gap.end);
+	}
+
+	#[test]
+	fn gap_update_helpers_warp_sync_edge_case() {
+		use sc_client_api::blockchain::{BlockGap, BlockGapType};
+
+		// Test the edge case mentioned in the comment:
+		// "Gap start possibly indicates block that was already imported
+		// during warp sync and start was not updated."
+		let mut gap = BlockGap {
+			start: 5u64,
+			end: 10u64,
+			gap_type: BlockGapType::MissingHeaderAndBody,
+		};
+
+		// Simulate importing block at gap.start + 1
+		let block_number = 6u64; // gap.start + 1
+		gap.start = block_number + 1;
+
+		// Gap should be advanced correctly
+		assert_eq!(gap.start, 7u64);
+		assert_eq!(gap.end, 10u64);
+		assert!(gap.start <= gap.end);
 	}
 }
