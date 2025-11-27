@@ -652,13 +652,58 @@ Based on code analysis, here's the complete sync flow:
 ```rust
 // Determine sync strategy
 match config.mode {
-    SyncMode::Full => start_full_sync(),
-    SyncMode::LightState => start_warp_sync(),
+    SyncMode::Full => start_full_sync(),           // Full sync from genesis
+    SyncMode::LightState => start_warp_sync(),     // Warp sync (fast)
     // ...
 }
 ```
 
-#### Phase 1: Warp Sync
+**Two Sync Paths:**
+
+1. **Full Sync** (default or fallback):
+   - Downloads all blocks from genesis sequentially
+   - Used when warp sync is disabled or as fallback when warp/state sync fails
+   - Slower but always reliable
+
+2. **Warp Sync** (fast sync):
+   - Jumps to finalized state using cryptographic proofs
+   - Downloads state for target block
+   - Fills historical gap
+   - Much faster for new nodes
+
+#### Phase 1a: Full Sync (Alternative Path)
+```rust
+// Full sync from genesis
+for block_num in 0..=best_known_block {
+    BlockRequest { from: block_num }
+
+    // Import with NetworkInitialSync origin
+    IncomingBlock {
+        origin: BlockOrigin::NetworkInitialSync,
+        // Standard verification
+    }
+}
+
+// Once caught up, transition to Live
+SyncState::Live
+```
+
+**When Full Sync is Used:**
+- Node configured with `--sync=full`
+- Warp sync disabled in configuration
+- **Fallback when warp sync fails** (see code below)
+
+**Fallback Evidence** (`substrate/client/network/sync/src/strategy/polkadot.rs`):
+```rust
+None => {
+    error!(target: LOG_TARGET, "Warp sync failed. Continuing with full sync.");
+    let chain_sync = ChainSync::new(...) // Start full sync
+}
+```
+
+---
+
+#### Phase 1b: Warp Sync (Fast Sync Path)
 ```rust
 // Download warp sync proof
 WarpProofRequest { begin: genesis_hash }
@@ -695,13 +740,26 @@ StateRequest {
 // Import state chunks
 // (What BlockOrigin is used here? Need to verify!)
 
-// Log message
-"State sync is complete, continuing with block sync."
+// Success
+if state.is_succeeded() {
+    info!(target: LOG_TARGET, "State sync is complete, continuing with block sync.");
+    // Proceed to gap sync
+} else {
+    // Fallback to full sync
+    error!(target: LOG_TARGET, "State sync failed. Falling back to full sync.");
+    let chain_sync = ChainSync::new(...) // Start full sync
+}
 ```
 
 **File:** `substrate/client/network/sync/src/strategy/state.rs`
 
+**Fallback Behavior:**
+- If state sync fails → ChainSync (full sync from current point)
+- Node still has warp target block, but falls back for safety
+
 **Question:** ❓ What `BlockOrigin` is assigned during state sync?
+- Likely `BlockOrigin::NetworkInitialSync`
+- **TODO:** Consider adding `BlockOrigin::StateSync` for clarity
 
 ---
 
@@ -744,31 +802,46 @@ on_block_announce(block) {
 ### State Transitions
 
 ```
-┌─────────────┐
-│  Initialize │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐     Success      ┌─────────────┐
-│  WarpSync   │ ─────────────────▶│  StateSync  │
-└──────┬──────┘                   └──────┬──────┘
-       │                                 │
-       │ Failure                         │ Success
-       │                                 │
-       ▼                                 ▼
-┌─────────────┐                   ┌─────────────┐
-│  ChainSync  │◀──────────────────│   GapSync   │
-│ (full sync) │     Gap Complete  │ (part of    │
-└──────┬──────┘                   │  ChainSync) │
-       │                          └──────┬──────┘
-       │                                 │
-       │                                 │
-       └─────────────┬───────────────────┘
-                     │
-                     ▼
-              ┌─────────────┐
-              │  Live Sync  │
-              └─────────────┘
+                    ┌─────────────┐
+                    │  Initialize │
+                    └──────┬──────┘
+                           │
+              ┌────────────┴────────────┐
+              │                         │
+              ▼                         ▼
+      ┌─────────────┐           ┌─────────────┐
+      │  Full Sync  │           │  WarpSync   │
+      │  (default)  │           │   (fast)    │
+      └──────┬──────┘           └──────┬──────┘
+             │                         │
+             │                         │ Success
+             │                         ▼
+             │                  ┌─────────────┐
+             │                  │  StateSync  │
+             │                  └──────┬──────┘
+             │                         │
+             │            ┌────────────┼────────────┐
+             │            │ Success    │ Failure    │
+             │            ▼            ▼            │
+             │     ┌─────────────┐    │            │
+             │     │   GapSync   │    │            │
+             │     │ (part of    │    │            │
+             │     │  ChainSync) │    │            │
+             │     └──────┬──────┘    │            │
+             │            │            │            │
+             └────────────┴────────────┴────────────┘
+                          │
+                          ▼
+                   ┌─────────────┐
+                   │  Live Sync  │
+                   └─────────────┘
+
+Legend:
+- Full Sync: Downloads all blocks from genesis
+- Warp Sync: Fast sync using finality proofs
+- State Sync: Download state for warp target
+- Gap Sync: Fill historical blocks
+- Fallback: Any failure → Full Sync → Live
 ```
 
 ---

@@ -133,16 +133,32 @@ pub enum BlockOrigin {
 
 Polkadot SDK supports multiple sync strategies:
 
-1. **Initial Sync:** Download all blocks from genesis
+1. **Full Sync (Initial Sync):** Download all blocks from genesis sequentially
 2. **Warp Sync:** Jump to finalized state using cryptographic proofs
 3. **State Sync:** Download state (trie nodes) for warp sync target block
 4. **Gap Sync:** Fill missing blocks after warp sync and state sync
 5. **Live Sync:** Process blocks as they arrive
 
-**Complete Warp Sync Flow:**
+**Sync Flows:**
+
+There are two main synchronization paths:
+
+**Full Sync Flow** (default or fallback):
 ```
-WarpSync → StateSync → ChainSync (includes GapSync) → Live
+Genesis → InitialSyncing (download all blocks) → Live
 ```
+
+**Warp Sync Flow** (fast sync):
+```
+WarpSync → StateSync → GapSync → Live
+         ↓ (on failure)
+      Full Sync (fallback)
+```
+
+**Fallback Behavior:**
+- If warp sync fails → fallback to full sync
+- If state sync fails → fallback to full sync
+- Full sync is always available as a reliable fallback
 
 Each phase has different verification requirements and performance characteristics.
 
