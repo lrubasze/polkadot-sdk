@@ -27,8 +27,9 @@ on:
       - ".github/workflows/check-getting-started.yml"
       - "scripts/getting-started.sh"
     types: [opened, synchronize, reopened, ready_for_review]
-  schedule:
-    - cron: "0 5 * * *"
+  # Disabled scheduled runs on fork
+  # schedule:
+  #   - cron: "0 5 * * *"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
